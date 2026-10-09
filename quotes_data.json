@@ -1,0 +1,452 @@
+[
+    {
+        "number": 2000,
+        "name": "12 Tool",
+        "markup": 70.0,
+        "discount": 0.0,
+        "required_date": "2026-11-13",
+        "required_date_option": "Specific date",
+        "customer": {
+            "name": "Reservoir",
+            "address": "Aberdeen",
+            "contact": "Angus",
+            "phone": "",
+            "email": ""
+        },
+        "items": [
+            {
+                "name": "Top Sub",
+                "req_date": "",
+                "drawing_number": "2-1547-2586-01",
+                "revision": "A",
+                "quantity": 1,
+                "material": "120mm Od X 300mm Long 4145",
+                "material_cost": 45.0,
+                "supplier": "Stock",
+                "mct_number": "",
+                "cast": "",
+                "operations": [
+                    {
+                        "type": "Turning",
+                        "time": 5.0,
+                        "rate": 70.0,
+                        "cost": 350.0
+                    },
+                    {
+                        "type": "Milling",
+                        "time": 1.0,
+                        "rate": 70.0,
+                        "cost": 70.0
+                    },
+                    {
+                        "type": "Phosphate",
+                        "time": 1.0,
+                        "rate": 20.0,
+                        "cost": 20.0
+                    }
+                ]
+            },
+            {
+                "name": "Bottom Sub",
+                "req_date": "",
+                "drawing_number": "2-1250-1600-02",
+                "revision": "A",
+                "quantity": 1,
+                "material": "100mm X 125mm Long 4145",
+                "material_cost": 30.0,
+                "supplier": "Stock",
+                "mct_number": "",
+                "cast": "",
+                "operations": [
+                    {
+                        "type": "Turning",
+                        "time": 4.0,
+                        "rate": 70.0,
+                        "cost": 280.0
+                    },
+                    {
+                        "type": "Milling",
+                        "time": 2.0,
+                        "rate": 70.0,
+                        "cost": 140.0
+                    },
+                    {
+                        "type": "Phosphate",
+                        "time": 1.0,
+                        "rate": 20.0,
+                        "cost": 20.0
+                    }
+                ]
+            }
+        ],
+        "status": "order",
+        "order_status": "Pending"
+    },
+    {
+        "number": 2001,
+        "name": "12 Tool",
+        "markup": 70.0,
+        "discount": 0.0,
+        "required_date": "2026-11-13",
+        "required_date_option": "Specific date",
+        "customer": {
+            "name": "Reservoir",
+            "address": "Aberdeen",
+            "contact": "Angus",
+            "phone": "",
+            "email": ""
+        },
+        "items": [
+            {
+                "name": "Top Sub",
+                "req_date": "",
+                "drawing_number": "2-1547-2586-01",
+                "revision": "A",
+                "quantity": 1,
+                "material": "120mm Od X 300mm Long 4145",
+                "material_cost": 45.0,
+                "supplier": "Stock",
+                "mct_number": "",
+                "cast": "",
+                "operations": [
+                    {
+                        "type": "Turning",
+                        "time": 5.0,
+                        "rate": 70.0,
+                        "cost": 350.0
+                    },
+                    {
+                        "type": "Milling",
+                        "time": 1.0,
+                        "rate": 70.0,
+                        "cost": 70.0
+                    },
+                    {
+                        "type": "Phosphate",
+                        "time": 1.0,
+                        "rate": 20.0,
+                        "cost": 20.0
+                    }
+                ]
+            },
+            {
+                "name": "Bottom Sub",
+                "req_date": "",
+                "drawing_number": "2-1250-1600-02",
+                "revision": "A",
+                "quantity": 1,
+                "material": "100mm X 125mm Long 4145",
+                "material_cost": 30.0,
+                "supplier": "Stock",
+                "mct_number": "",
+                "cast": "",
+                "operations": [
+                    {
+                        "type": "Turning",
+                        "time": 4.0,
+                        "rate": 70.0,
+                        "cost": 280.0
+                    },
+                    {
+                        "type": "Milling",
+                        "time": 2.0,
+                        "rate": 70.0,
+                        "cost": 140.0
+                    },
+                    {
+                        "type": "Phosphate",
+                        "time": 1.0,
+                        "rate": 20.0,
+                        "cost": 20.0
+                    }
+                ]
+            }
+        ],
+        "status": "order",
+        "order_status": "Pending"
+    },
+    {
+        "number": 3001,
+        "name": "Well1",
+        "markup": 70.0,
+        "discount": 0.0,
+        "required_date": "2026-10-31",
+        "required_date_option": "Specific date",
+        "customer": {
+            "name": "Wellvene",
+            "address": "Technology House, Pitmedden Road, Dyce, Aberdeen, AB21 0DP",
+            "contact": "Becca Reilly",
+            "phone": "01224 502200",
+            "email": "Breilly@wellvene.com"
+        },
+        "items": [
+            {
+                "name": "Slip",
+                "req_date": "",
+                "drawing_number": "4446-1019",
+                "revision": "0",
+                "quantity": 1,
+                "material": "",
+                "material_cost": 20.0,
+                "supplier": "",
+                "mct_number": "",
+                "cast": "",
+                "operations": [
+                    {
+                        "type": "Turning",
+                        "time": 6.0,
+                        "rate": 70.0,
+                        "cost": 420.0
+                    },
+                    {
+                        "type": "Blasting",
+                        "time": 1.0,
+                        "rate": 20.0,
+                        "cost": 20.0
+                    }
+                ]
+            },
+            {
+                "name": "Mandrel",
+                "req_date": "",
+                "drawing_number": "4446-1004",
+                "revision": "0",
+                "quantity": 2,
+                "material": "",
+                "material_cost": 20.0,
+                "supplier": "",
+                "mct_number": "",
+                "cast": "",
+                "operations": [
+                    {
+                        "type": "Turning",
+                        "time": 5.0,
+                        "rate": 70.0,
+                        "cost": 350.0
+                    },
+                    {
+                        "type": "Milling",
+                        "time": 2.0,
+                        "rate": 70.0,
+                        "cost": 140.0
+                    },
+                    {
+                        "type": "Blasting",
+                        "time": 1.0,
+                        "rate": 20.0,
+                        "cost": 20.0
+                    }
+                ]
+            },
+            {
+                "name": "Body Lock Ring",
+                "req_date": "",
+                "drawing_number": "4446-1007",
+                "revision": "0",
+                "quantity": 2,
+                "material": "",
+                "material_cost": 10.0,
+                "supplier": "",
+                "mct_number": "",
+                "cast": "",
+                "operations": [
+                    {
+                        "type": "Turning",
+                        "time": 1.0,
+                        "rate": 70.0,
+                        "cost": 70.0
+                    },
+                    {
+                        "type": "Blasting",
+                        "time": 1.0,
+                        "rate": 20.0,
+                        "cost": 20.0
+                    }
+                ]
+            },
+            {
+                "name": "Slip Housing",
+                "req_date": "",
+                "drawing_number": "4446-1008",
+                "revision": "0",
+                "quantity": 2,
+                "material": "",
+                "material_cost": 30.0,
+                "supplier": "",
+                "mct_number": "",
+                "cast": "",
+                "operations": [
+                    {
+                        "type": "Turning",
+                        "time": 6.0,
+                        "rate": 70.0,
+                        "cost": 420.0
+                    },
+                    {
+                        "type": "Milling",
+                        "time": 3.0,
+                        "rate": 70.0,
+                        "cost": 210.0
+                    },
+                    {
+                        "type": "Blasting",
+                        "time": 1.0,
+                        "rate": 20.0,
+                        "cost": 20.0
+                    }
+                ]
+            },
+            {
+                "name": "Rachet Key",
+                "req_date": "",
+                "drawing_number": "4446-1006",
+                "revision": "1",
+                "quantity": 1,
+                "material": "",
+                "material_cost": 10.0,
+                "supplier": "",
+                "mct_number": "",
+                "cast": "",
+                "operations": [
+                    {
+                        "type": "Turning",
+                        "time": 1.0,
+                        "rate": 70.0,
+                        "cost": 70.0
+                    },
+                    {
+                        "type": "Milling",
+                        "time": 1.0,
+                        "rate": 70.0,
+                        "cost": 70.0
+                    },
+                    {
+                        "type": "Phosphate",
+                        "time": 1.0,
+                        "rate": 20.0,
+                        "cost": 20.0
+                    }
+                ]
+            }
+        ],
+        "status": "quote"
+    },
+    {
+        "number": 2002,
+        "name": "Piotr123",
+        "markup": 70.0,
+        "discount": 5.0,
+        "required_date": "2026-11-06",
+        "required_date_option": "4 weeks",
+        "customer": {
+            "name": "Reservoir",
+            "address": "Wellvention UK Ltd\nUnit 1 Westpark Drive, Blackburn, Aberdeenshire, AB21 0BU \nUnited Kingdom",
+            "contact": "Piotr Mirek",
+            "phone": "",
+            "email": "Piotr.Mirek@reservoirgroup.com"
+        },
+        "items": [
+            {
+                "name": "Flapper Insert",
+                "req_date": "",
+                "drawing_number": "2-1025-5000-05",
+                "revision": "A",
+                "quantity": 5,
+                "material": "",
+                "material_cost": 5.0,
+                "supplier": "",
+                "mct_number": "",
+                "cast": "",
+                "operations": [
+                    {
+                        "type": "Turning",
+                        "time": 1.0,
+                        "rate": 70.0,
+                        "cost": 70.0
+                    },
+                    {
+                        "type": "Milling",
+                        "time": 1.0,
+                        "rate": 70.0,
+                        "cost": 70.0
+                    },
+                    {
+                        "type": "Phosphate",
+                        "time": 1.0,
+                        "rate": 20.0,
+                        "cost": 20.0
+                    }
+                ]
+            },
+            {
+                "name": "Hlapper Hoising",
+                "req_date": "",
+                "drawing_number": "2-1025-5000-04",
+                "revision": "A",
+                "quantity": 5,
+                "material": "",
+                "material_cost": 5.0,
+                "supplier": "",
+                "mct_number": "",
+                "cast": "",
+                "operations": [
+                    {
+                        "type": "Turning",
+                        "time": 2.0,
+                        "rate": 70.0,
+                        "cost": 140.0
+                    },
+                    {
+                        "type": "Milling",
+                        "time": 1.0,
+                        "rate": 70.0,
+                        "cost": 70.0
+                    },
+                    {
+                        "type": "Phosphate",
+                        "time": 1.0,
+                        "rate": 20.0,
+                        "cost": 20.0
+                    }
+                ]
+            },
+            {
+                "name": "Flapper",
+                "req_date": "",
+                "drawing_number": "2-1025-5000-03",
+                "revision": "A",
+                "quantity": 5,
+                "material": "",
+                "material_cost": 5.0,
+                "supplier": "",
+                "mct_number": "",
+                "cast": "",
+                "operations": [
+                    {
+                        "type": "Turning",
+                        "time": 1.0,
+                        "rate": 70.0,
+                        "cost": 70.0
+                    },
+                    {
+                        "type": "Milling",
+                        "time": 1.0,
+                        "rate": 70.0,
+                        "cost": 70.0
+                    },
+                    {
+                        "type": "Phosphate",
+                        "time": 1.0,
+                        "rate": 20.0,
+                        "cost": 20.0
+                    }
+                ]
+            }
+        ],
+        "status": "order",
+        "order_status": "Pending",
+        "job_card_generated": false,
+        "customer_po_number": "",
+        "delivery_note_number": 200
+    }
+]

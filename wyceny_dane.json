@@ -1,0 +1,21 @@
+[
+    {
+        "numer": 1,
+        "klient": {
+            "nazwa": "Wellvene",
+            "adres": "",
+            "osoba": "",
+            "telefon": ""
+        },
+        "adres": "",
+        "nazwa": "Various Parts",
+        "operacje": [
+            {
+                "typ": "Turning",
+                "czas": 4.0,
+                "stawka": 50.0,
+                "koszt": 200.0
+            }
+        ]
+    }
+]

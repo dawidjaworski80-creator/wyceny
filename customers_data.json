@@ -1,0 +1,33 @@
+{
+    "Oilenco": {
+        "address": "Silvertrees Business Park\t, \nWesthill\t, Aberdeen\t, AB32 6BH",
+        "contacts": {
+            "Donna Bain": {
+                "phone": "1224555666",
+                "email": "DBain@oilenco.com"
+            }
+        }
+    },
+    "Wellvene": {
+        "address": "Technology House, Pitmedden Road, Dyce, Aberdeen, AB21 0DP",
+        "contacts": {
+            "Becca Reilly": {
+                "phone": "01224 502200",
+                "email": "Breilly@wellvene.com"
+            }
+        }
+    },
+    "Reservoir": {
+        "address": "Wellvention UK Ltd\nUnit 1 Westpark Drive, Blackburn, Aberdeenshire, AB21 0BU \nUnited Kingdom",
+        "contacts": {
+            "Angus": {
+                "phone": "",
+                "email": ""
+            },
+            "Piotr Mirek": {
+                "phone": "",
+                "email": "Piotr.Mirek@reservoirgroup.com"
+            }
+        }
+    }
+}
