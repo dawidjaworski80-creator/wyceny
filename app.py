@@ -61,6 +61,99 @@ class GridTreeview(ttk.Treeview):
                     anchor=tk.CENTER,
                 )
         self.configure(displaycolumns=displayed_columns)
+        self._cell_text_entry = None
+        self._cell_context = None
+        self.cell_paste_handler = None
+        self.cell_paste_columns = set()
+        self.bind("<Button-3>", self.select_cell_text, add="+")
+
+    def select_cell_text(self, event):
+        if self._cell_text_entry is not None:
+            self._cell_text_entry.destroy()
+            self._cell_text_entry = None
+
+        region = self.identify_region(event.x, event.y)
+        if region not in ("cell", "tree"):
+            return
+
+        row_id = self.identify_row(event.y)
+        column_id = self.identify_column(event.x)
+        if not row_id:
+            return
+
+        if column_id == "#0":
+            column = "#0"
+            value = self.item(row_id, "text")
+        else:
+            display_columns = self["displaycolumns"]
+            column_index = int(column_id[1:]) - 1
+            if column_index >= len(display_columns):
+                return
+            column = display_columns[column_index]
+            if column in self.separator_columns:
+                return
+            value = self.set(row_id, column)
+
+        cell_box = self.bbox(row_id, column)
+        if not cell_box:
+            return
+        self._cell_context = (row_id, column, str(value))
+        x, y, width, height = cell_box
+        entry = ttk.Entry(self)
+        entry.place(x=x, y=y, width=width, height=height)
+        entry.insert(0, value)
+        entry.configure(state="readonly")
+        entry.selection_range(0, tk.END)
+        entry.focus_set()
+        self._cell_text_entry = entry
+        entry.bind(
+            "<FocusOut>",
+            lambda event: event.widget.after_idle(self._close_cell_text_entry),
+        )
+        entry.bind(
+            "<Escape>",
+            lambda event: event.widget.after_idle(self._close_cell_text_entry),
+        )
+        menu = tk.Menu(self, tearoff=False)
+        menu.add_command(label="Copy", command=self.copy_cell_text)
+        menu.add_command(
+            label="Paste",
+            command=self.paste_cell_text,
+            state=(
+                tk.NORMAL
+                if self.cell_paste_handler is not None
+                and column in self.cell_paste_columns
+                else tk.DISABLED
+            ),
+        )
+        menu.tk_popup(event.x_root, event.y_root)
+        menu.grab_release()
+        return "break"
+
+    def copy_cell_text(self):
+        if self._cell_context is None:
+            return
+        self.clipboard_clear()
+        self.clipboard_append(self._cell_context[2])
+
+    def paste_cell_text(self):
+        if self._cell_context is None or self.cell_paste_handler is None:
+            return
+        row_id = self._cell_context[0]
+        column = self._cell_context[1]
+        if column not in self.cell_paste_columns:
+            return
+        try:
+            value = self.clipboard_get()
+        except tk.TclError:
+            return
+        self._close_cell_text_entry()
+        self.cell_paste_handler(row_id, column, value)
+
+    def _close_cell_text_entry(self):
+        if self._cell_text_entry is not None:
+            self._cell_text_entry.destroy()
+            self._cell_text_entry = None
 
     def insert(self, parent, index, iid=None, **kwargs):
         row_number = len(self.get_children(parent))
@@ -465,6 +558,67 @@ class CncQuotesApp:
         self.tree.bind("<Motion>", self.update_tree_cursor)
         self.tree.bind("<Leave>", lambda event: self.tree.configure(cursor=""))
         self.tree.bind("<Double-1>", self.handle_tree_double_click)
+        self.tree.cell_paste_handler = self.paste_quote_list_cell
+        self.tree.cell_paste_columns = {
+            "customer",
+            "customer_po",
+            "name",
+            "required_date",
+            "order_status",
+        }
+        self.root.bind_all("<Button-3>", self.show_input_context_menu, add="+")
+
+    def show_input_context_menu(self, event):
+        widget = event.widget
+        if not isinstance(widget, (tk.Entry, tk.Text, ttk.Entry, ttk.Combobox)):
+            return
+
+        is_text = isinstance(widget, tk.Text)
+        state = widget.cget("state")
+        can_edit = state not in (tk.DISABLED, "disabled", "readonly")
+
+        def copy_text():
+            try:
+                if is_text:
+                    try:
+                        value = widget.get("sel.first", "sel.last")
+                    except tk.TclError:
+                        value = widget.get("1.0", "end-1c")
+                elif widget.selection_present():
+                    start = widget.index(tk.SEL_FIRST)
+                    end = widget.index(tk.SEL_LAST)
+                    value = widget.get()[start:end]
+                else:
+                    value = widget.get()
+            except (AttributeError, tk.TclError):
+                value = widget.get()
+            self.root.clipboard_clear()
+            self.root.clipboard_append(value)
+
+        def select_all():
+            if is_text:
+                widget.tag_add(tk.SEL, "1.0", "end-1c")
+            else:
+                widget.selection_range(0, tk.END)
+                widget.icursor(tk.END)
+
+        menu = tk.Menu(widget, tearoff=False)
+        menu.add_command(label="Copy", command=copy_text)
+        menu.add_command(
+            label="Paste",
+            command=lambda: widget.event_generate("<<Paste>>"),
+            state=tk.NORMAL if can_edit else tk.DISABLED,
+        )
+        menu.add_command(
+            label="Cut",
+            command=lambda: widget.event_generate("<<Cut>>"),
+            state=tk.NORMAL if can_edit else tk.DISABLED,
+        )
+        menu.add_separator()
+        menu.add_command(label="Select All", command=select_all)
+        menu.tk_popup(event.x_root, event.y_root)
+        menu.grab_release()
+        return "break"
 
     def refresh_app_logo(self):
         logo_path = self.settings.get("Logo_Path", "").strip()
@@ -653,6 +807,83 @@ class CncQuotesApp:
                 activebackground=color,
                 relief=tk.FLAT,
             )
+
+    def paste_quote_list_cell(self, row_id, column, value):
+        if self.show_changes_blocked():
+            return
+
+        quote_index = next(
+            (
+                index
+                for index, quote in enumerate(self.quotes)
+                if row_id == f"record_{id(quote)}"
+            ),
+            None,
+        )
+        if quote_index is None:
+            return
+
+        updated_quote = deepcopy(self.quotes[quote_index])
+        value = value.strip()
+        if column == "customer":
+            customer = updated_quote.get("customer", "")
+            if isinstance(customer, dict):
+                customer["name"] = value
+            else:
+                updated_quote["customer"] = value
+        elif column == "customer_po":
+            updated_quote["customer_po_number"] = value
+        elif column == "name":
+            updated_quote["name"] = value
+        elif column == "required_date":
+            if value:
+                for date_format in ("%Y-%m-%d", "%d.%m.%Y", "%Y/%m/%d"):
+                    try:
+                        parsed_date = datetime.strptime(value, date_format).date()
+                        break
+                    except ValueError:
+                        parsed_date = None
+                if parsed_date is None:
+                    messagebox.showerror(
+                        "Invalid date",
+                        "Paste a date in YYYY-MM-DD or DD.MM.YYYY format.",
+                        parent=self.root,
+                    )
+                    return
+                updated_quote["required_date"] = parsed_date.isoformat()
+                updated_quote["required_date_option"] = "Specific date"
+            else:
+                updated_quote["required_date"] = ""
+                updated_quote["required_date_option"] = ""
+        elif column == "order_status":
+            if updated_quote.get("status") != "order" or value not in (
+                "Pending",
+                "Completed",
+                "Invoiced",
+            ):
+                messagebox.showerror(
+                    "Invalid status",
+                    "Order status must be Pending, Completed, or Invoiced.",
+                    parent=self.root,
+                )
+                return
+            updated_quote["order_status"] = value
+        else:
+            return
+
+        original_quote = self.quotes[quote_index]
+        self.quotes[quote_index] = updated_quote
+        try:
+            self.save_data()
+        except OSError as exc:
+            self.quotes[quote_index] = original_quote
+            messagebox.showerror(
+                "Save failed",
+                f"Could not save the pasted value:\n{exc}",
+                parent=self.root,
+            )
+            return
+        self.refresh_list()
 
     def handle_job_card_click(self, event):
         if self.tree.identify_region(event.x, event.y) != "cell":
@@ -3714,6 +3945,65 @@ class CncQuotesApp:
             lbl_gross.config(text=f"Gross Total: {gross_total:.2f}")
             if is_order:
                 refresh_work_item_choices(selected_work_item)
+
+        def paste_item_cell(row_id, column, value):
+            if self.show_changes_blocked(window):
+                return
+            try:
+                item = temp_items[int(row_id)]
+            except (ValueError, IndexError):
+                return
+
+            if column == "quantity":
+                try:
+                    quantity = int(value.strip())
+                    if quantity < 1:
+                        raise ValueError
+                except ValueError:
+                    messagebox.showerror(
+                        "Invalid quantity",
+                        "Quantity must be a positive whole number.",
+                        parent=window,
+                    )
+                    return
+                item[column] = quantity
+            elif column == "material_cost":
+                try:
+                    material_cost = float(value.strip().replace(",", "."))
+                    if not math.isfinite(material_cost) or material_cost < 0:
+                        raise ValueError
+                except ValueError:
+                    messagebox.showerror(
+                        "Invalid material cost",
+                        "Material cost must be a non-negative number.",
+                        parent=window,
+                    )
+                    return
+                item[column] = material_cost
+            elif column in (
+                "name",
+                "drawing_number",
+                "revision",
+                "req_date",
+                "material",
+                "supplier",
+            ):
+                item[column] = value.strip()
+            else:
+                return
+            refresh_items_and_totals()
+
+        items_tree.cell_paste_handler = paste_item_cell
+        items_tree.cell_paste_columns = {
+            "name",
+            "drawing_number",
+            "revision",
+            "quantity",
+            "req_date",
+            "material",
+            "material_cost",
+            "supplier",
+        }
 
         var_discount.trace_add("write", refresh_items_and_totals)
         var_markup.trace_add("write", refresh_items_and_totals)
