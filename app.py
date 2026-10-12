@@ -20,6 +20,7 @@ from pdf_layouts import (
     TABLE_COLUMN_CATALOG,
     generate_layout_document,
     get_layouts,
+    get_table_column_widths,
 )
 
 
@@ -199,6 +200,9 @@ class CncQuotesApp:
             self.save_customers()
         self.suppliers = self.store.load_suppliers()
         self.quotes = self.store.load_data()
+        markup_updated = self._normalize_quote_markups()
+        if markup_updated and not self.software_is_expired():
+            self.save_data()
         self.quote_clipboard = None
         self.item_clipboard = None
         suppliers_updated = False
@@ -217,6 +221,41 @@ class CncQuotesApp:
 
     def save_data(self):
         self.store.save_data(self.quotes)
+
+    def _normalize_quote_markups(self):
+        changed = False
+        for quote in self.quotes:
+            legacy_markup = quote.get("markup", 0.0)
+            items = quote.get("items", [])
+            if not items and "operations" in quote:
+                items = [{
+                    "name": quote.get("name", "Main Part"),
+                    "drawing_number": quote.get("drawing_number", ""),
+                    "revision": quote.get("revision", ""),
+                    "quantity": 1,
+                    "material": quote.get("material", ""),
+                    "material_cost": quote.get("material_cost", 0),
+                    "operations": list(quote["operations"]),
+                    "markup": legacy_markup,
+                }]
+                quote["items"] = items
+                changed = True
+            for item in items:
+                if "markup" not in item:
+                    item["markup"] = legacy_markup
+                    changed = True
+            if "markup" in quote:
+                quote.pop("markup")
+                changed = True
+        return changed
+
+    @staticmethod
+    def get_item_markup(item, legacy_markup=0.0):
+        try:
+            markup = float(item.get("markup", legacy_markup) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+        return markup if math.isfinite(markup) and markup >= 0 else 0.0
 
     def save_settings(self):
         self.store.save_settings(self.settings)
@@ -333,16 +372,16 @@ class CncQuotesApp:
             self.customers[company] = normalized
         return changed
 
-    def calculate_quote_totals(self, items, discount_pct, markup_pct=0.0):
-        cost_subtotal = 0.0
+    def calculate_quote_totals(self, items, discount_pct, legacy_markup=0.0):
+        subtotal = 0.0
         for item in items:
             quantity = int(item.get("quantity", 1) or 1)
             item_cost = float(item.get("material_cost", 0) or 0)
             for op in item.get("operations", []):
                 item_cost += float(op.get("cost", 0))
-            cost_subtotal += item_cost * quantity
+            markup = self.get_item_markup(item, legacy_markup)
+            subtotal += item_cost * quantity * (1 + markup / 100.0)
 
-        subtotal = cost_subtotal * (1 + markup_pct / 100.0)
         discount_amt = subtotal * (discount_pct / 100.0)
         net_total = subtotal - discount_amt
         vat_rate = self.settings.get("VAT_Rate", 20.0)
@@ -1895,7 +1934,10 @@ class CncQuotesApp:
                 ("Rates", lambda: self.open_rates_settings_window(win)),
                 ("Stats", open_stats_from_settings),
                 ("Company Details", lambda: self.open_company_details_window(win)),
-                ("PDF Layout Generator", lambda: self.open_pdf_layout_editor(win)),
+                (
+                    "PDF Layout Generator",
+                    lambda: self.open_simple_pdf_layout_editor(win),
+                ),
             )
         ):
             button = tk.Button(
@@ -1963,6 +2005,667 @@ class CncQuotesApp:
             f"{window_width}x{window_height}+{window_x}+{window_y}"
         )
 
+    def open_simple_pdf_layout_editor(self, parent):
+        layouts = get_layouts(self.settings)
+        window = tk.Toplevel(parent)
+        window.title("PDF Layout Editor")
+        window.geometry("1180x780")
+        window.minsize(980, 680)
+        window.transient(parent)
+        window.grab_set()
+
+        document_types = {
+            "Quote": "quote",
+            "Delivery Note": "delivery_note",
+            "Job Card": "job_card",
+        }
+        selected_document = tk.StringVar(value="Quote")
+        current_type = {"value": "quote"}
+        selected_index = {"value": None}
+        drag_state = {"index": None, "dx": 0, "dy": 0}
+
+        toolbar = tk.Frame(window, padx=12, pady=8)
+        toolbar.pack(fill=tk.X)
+        tk.Label(toolbar, text="Document:").pack(side=tk.LEFT)
+        document_choice = ttk.Combobox(
+            toolbar,
+            textvariable=selected_document,
+            values=tuple(document_types),
+            state="readonly",
+            width=18,
+        )
+        document_choice.pack(side=tk.LEFT, padx=(6, 18))
+        tk.Label(
+            toolbar,
+            text="Select an element, drag it on the page, or add a new one.",
+            fg="#475569",
+        ).pack(side=tk.LEFT)
+
+        body = tk.Frame(window)
+        body.pack(fill=tk.BOTH, expand=True, padx=12, pady=4)
+        preview_panel = tk.Frame(body, bg="#E2E8F0")
+        preview_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
+        canvas = tk.Canvas(preview_panel, bg="#E2E8F0", highlightthickness=0)
+        canvas.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+
+        side = tk.Frame(body, width=330)
+        side.pack(side=tk.RIGHT, fill=tk.Y)
+        side.pack_propagate(False)
+
+        add_frame = tk.LabelFrame(side, text="Add", padx=8, pady=8)
+        add_frame.pack(fill=tk.X, pady=(0, 8))
+        add_choice = ttk.Combobox(add_frame, state="readonly", width=30)
+        add_choice.pack(fill=tk.X, pady=(0, 6))
+        add_button = tk.Button(add_frame, text="Add field")
+        add_button.pack(fill=tk.X)
+        tk.Button(
+            add_frame,
+            text="Insert data table",
+            command=lambda: add_table("items_table"),
+        ).pack(fill=tk.X, pady=(6, 0))
+        tk.Button(
+            add_frame,
+            text="Insert custom table",
+            command=lambda: add_table("custom_table"),
+        ).pack(fill=tk.X, pady=(4, 0))
+        tk.Button(
+            add_frame,
+            text="Add text",
+            command=lambda: add_custom_text(),
+        ).pack(fill=tk.X, pady=(4, 0))
+
+        elements_frame = tk.LabelFrame(side, text="Elements", padx=8, pady=8)
+        elements_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+        element_list = tk.Listbox(elements_frame, height=9, exportselection=False)
+        element_list.pack(fill=tk.BOTH, expand=True)
+        tk.Button(
+            elements_frame,
+            text="Delete selected",
+            command=lambda: delete_selected(),
+        ).pack(fill=tk.X, pady=(6, 0))
+
+        property_frame = tk.LabelFrame(side, text="Selected element", padx=8, pady=8)
+        property_frame.pack(fill=tk.X)
+        property_entries = {}
+        for row, (key, label) in enumerate(
+            (
+                ("label", "Text / label"),
+                ("x", "X position (mm)"),
+                ("y", "Y position (mm)"),
+                ("w", "Width (mm)"),
+                ("h", "Height (mm)"),
+                ("font_size", "Font size"),
+            )
+        ):
+            tk.Label(property_frame, text=label, anchor=tk.W).grid(
+                row=row,
+                column=0,
+                sticky="w",
+                padx=(0, 6),
+                pady=2,
+            )
+            entry = tk.Entry(property_frame, width=12)
+            entry.grid(row=row, column=1, sticky="ew", pady=2)
+            property_entries[key] = entry
+        property_frame.columnconfigure(1, weight=1)
+        visible_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            property_frame,
+            text="Visible",
+            variable=visible_var,
+            command=lambda: update_selected({"visible": visible_var.get()}),
+        ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(4, 2))
+        tk.Button(
+            property_frame,
+            text="Apply properties",
+            command=lambda: apply_properties(),
+        ).grid(row=7, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+
+        actions = tk.Frame(window, padx=12, pady=8)
+        actions.pack(fill=tk.X)
+        tk.Button(
+            actions,
+            text="Preview PDF",
+            command=lambda: preview_pdf(),
+        ).pack(side=tk.LEFT)
+        tk.Button(
+            actions,
+            text="Reset document",
+            command=lambda: reset_document(),
+        ).pack(side=tk.LEFT, padx=8)
+        tk.Button(
+            actions,
+            text="Cancel",
+            command=window.destroy,
+        ).pack(side=tk.RIGHT)
+        tk.Button(
+            actions,
+            text="Save layout",
+            command=lambda: save_layout(),
+            bg="#2563EB",
+            fg="white",
+            padx=16,
+        ).pack(side=tk.RIGHT, padx=8)
+
+        page_geometry = {"x": 0, "y": 0, "scale": 1}
+
+        def elements():
+            return layouts[current_type["value"]]
+
+        def element_label(element):
+            labels = dict(FIELD_CATALOG[current_type["value"]])
+            if element.get("field") == "custom_table":
+                return element.get("label") or "Custom table"
+            return element.get("label") or labels.get(
+                element.get("field", ""),
+                element.get("field", ""),
+            )
+
+        def update_selected(changes):
+            index = selected_index["value"]
+            if index is None or index >= len(elements()):
+                return
+            elements()[index].update(changes)
+            draw_preview()
+
+        def load_selected():
+            index = selected_index["value"]
+            if index is None or index >= len(elements()):
+                for entry in property_entries.values():
+                    entry.delete(0, tk.END)
+                visible_var.set(False)
+                return
+            element = elements()[index]
+            for key, entry in property_entries.items():
+                entry.delete(0, tk.END)
+                entry.insert(0, str(element.get(key, "")))
+            visible_var.set(bool(element.get("visible", True)))
+
+        def refresh_elements():
+            element_list.delete(0, tk.END)
+            for element in elements():
+                element_list.insert(tk.END, element_label(element))
+            index = selected_index["value"]
+            if index is not None and index < len(elements()):
+                element_list.selection_set(index)
+            load_selected()
+            draw_preview()
+
+        def apply_properties():
+            index = selected_index["value"]
+            if index is None or index >= len(elements()):
+                return
+            try:
+                values = {
+                    "x": float(property_entries["x"].get().replace(",", ".")),
+                    "y": float(property_entries["y"].get().replace(",", ".")),
+                    "w": float(property_entries["w"].get().replace(",", ".")),
+                    "h": float(property_entries["h"].get().replace(",", ".")),
+                    "font_size": int(property_entries["font_size"].get()),
+                }
+                if values["w"] <= 0 or values["h"] <= 0:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror(
+                    "Invalid properties",
+                    "Enter valid positions, dimensions and font size.",
+                    parent=window,
+                )
+                return
+            values["label"] = property_entries["label"].get()
+            values["visible"] = visible_var.get()
+            elements()[index].update(values)
+            refresh_elements()
+
+        def add_element(field, label="", extra=None):
+            index = len(elements())
+            element = {
+                "id": f"{field}-{index + 1}",
+                "field": field,
+                "label": label,
+                "x": 15,
+                "y": min(245, 15 + index * 8),
+                "w": 120,
+                "h": 18,
+                "font_size": 10,
+                "font": "Arial",
+                "style": "",
+                "color": "#111827",
+                "visible": True,
+            }
+            if extra:
+                element.update(extra)
+            elements().append(element)
+            selected_index["value"] = index
+            refresh_elements()
+
+        def add_custom_text():
+            dialog = tk.Toplevel(window)
+            dialog.title("Add text")
+            dialog.geometry("420x230")
+            dialog.transient(window)
+            dialog.grab_set()
+            tk.Label(dialog, text="Text:").pack(anchor=tk.W, padx=12, pady=(12, 3))
+            text_entry = tk.Text(dialog, height=6, wrap=tk.WORD)
+            text_entry.pack(fill=tk.BOTH, expand=True, padx=12)
+
+            def finish_text():
+                text = text_entry.get("1.0", tk.END).strip()
+                if not text:
+                    messagebox.showwarning(
+                        "Text required",
+                        "Enter text to insert.",
+                        parent=dialog,
+                    )
+                    return
+                add_element("custom_text", text)
+                dialog.destroy()
+
+            tk.Button(dialog, text="Insert", command=finish_text).pack(
+                side=tk.RIGHT,
+                padx=12,
+                pady=10,
+            )
+
+        def add_table(table_kind):
+            if table_kind == "items_table":
+                columns = list(DEFAULT_TABLE_COLUMNS[current_type["value"]])
+                add_element(
+                    "items_table",
+                    extra={
+                        "label": "Items",
+                        "table_columns": columns,
+                        "show_table_lines": True,
+                    },
+                )
+                return
+            wizard = tk.Toplevel(window)
+            wizard.title("Insert custom table")
+            wizard.geometry("760x640")
+            wizard.transient(window)
+            wizard.grab_set()
+            content = tk.Frame(wizard, padx=12, pady=12)
+            content.pack(fill=tk.BOTH, expand=True)
+            size = tk.Frame(content)
+            size.pack(fill=tk.X, pady=(0, 8))
+            tk.Label(size, text="Rows:").pack(side=tk.LEFT)
+            rows_spin = tk.Spinbox(size, from_=1, to=20, width=5)
+            rows_spin.delete(0, tk.END)
+            rows_spin.insert(0, "3")
+            rows_spin.pack(side=tk.LEFT, padx=(4, 14))
+            tk.Label(size, text="Columns:").pack(side=tk.LEFT)
+            columns_spin = tk.Spinbox(size, from_=1, to=12, width=5)
+            columns_spin.delete(0, tk.END)
+            columns_spin.insert(0, "3")
+            columns_spin.pack(side=tk.LEFT, padx=4)
+            lines = tk.BooleanVar(value=True)
+            tk.Checkbutton(size, text="Show table lines", variable=lines).pack(
+                side=tk.LEFT,
+                padx=14,
+            )
+            table_canvas = tk.Canvas(content, highlightthickness=0)
+            table_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            table_scroll = ttk.Scrollbar(
+                content,
+                orient=tk.VERTICAL,
+                command=table_canvas.yview,
+            )
+            table_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+            table_canvas.configure(yscrollcommand=table_scroll.set)
+            table_editor = tk.Frame(table_canvas)
+            table_canvas.create_window((0, 0), window=table_editor, anchor=tk.NW)
+            table_editor.bind(
+                "<Configure>",
+                lambda event: table_canvas.configure(
+                    scrollregion=table_canvas.bbox("all")
+                ),
+            )
+            cells = []
+            widths = []
+            heights = []
+
+            def build_grid():
+                try:
+                    row_count = int(rows_spin.get())
+                    column_count = int(columns_spin.get())
+                    if row_count < 1 or column_count < 1:
+                        raise ValueError
+                except ValueError:
+                    messagebox.showerror(
+                        "Invalid size",
+                        "Rows and columns must be positive whole numbers.",
+                        parent=wizard,
+                    )
+                    return
+                for child in table_editor.winfo_children():
+                    child.destroy()
+                cells.clear()
+                widths.clear()
+                heights.clear()
+                tk.Label(table_editor, text="Row height (mm)").grid(
+                    row=0,
+                    column=0,
+                    padx=3,
+                    pady=3,
+                )
+                for column in range(column_count):
+                    tk.Label(
+                        table_editor,
+                        text=f"Column {column + 1} (%)",
+                    ).grid(row=0, column=column + 1, padx=3, pady=3)
+                    entry = tk.Entry(table_editor, width=12, justify="right")
+                    entry.insert(0, f"{100 / column_count:.2f}")
+                    entry.grid(row=1, column=column + 1, padx=3, pady=3)
+                    widths.append(entry)
+                for row in range(row_count):
+                    height = tk.Entry(table_editor, width=12, justify="right")
+                    height.insert(0, "8")
+                    height.grid(row=row + 2, column=0, padx=3, pady=3)
+                    heights.append(height)
+                    row_cells = []
+                    for column in range(column_count):
+                        cell = tk.Entry(table_editor, width=20)
+                        cell.grid(row=row + 2, column=column + 1, padx=3, pady=3)
+                        row_cells.append(cell)
+                    cells.append(row_cells)
+
+            build_grid()
+
+            def finish_table():
+                try:
+                    column_widths = [
+                        float(entry.get().replace(",", "."))
+                        for entry in widths
+                    ]
+                    row_heights = [
+                        float(entry.get().replace(",", "."))
+                        for entry in heights
+                    ]
+                    if (
+                        not column_widths
+                        or any(value <= 0 for value in column_widths)
+                        or any(value <= 0 for value in row_heights)
+                    ):
+                        raise ValueError
+                except ValueError:
+                    messagebox.showerror(
+                        "Invalid dimensions",
+                        "Column widths and row heights must be positive numbers.",
+                        parent=wizard,
+                    )
+                    return
+                add_element(
+                    "custom_table",
+                    extra={
+                        "label": "Custom table",
+                        "custom_cells": [
+                            [cell.get().strip() for cell in row]
+                            for row in cells
+                        ],
+                        "column_widths": {
+                            f"custom_{index}": value
+                            for index, value in enumerate(column_widths)
+                        },
+                        "row_heights": row_heights,
+                        "show_table_lines": lines.get(),
+                    },
+                )
+                wizard.destroy()
+
+            tk.Button(
+                wizard,
+                text="Insert table",
+                command=finish_table,
+                bg="#2563EB",
+                fg="white",
+            ).pack(side=tk.RIGHT, padx=12, pady=8)
+
+        def delete_selected():
+            index = selected_index["value"]
+            if index is None or index >= len(elements()):
+                return
+            elements().pop(index)
+            selected_index["value"] = None
+            refresh_elements()
+
+        def reset_document():
+            if not messagebox.askyesno(
+                "Reset document",
+                "Restore the default layout for this document?",
+                parent=window,
+            ):
+                return
+            layouts[current_type["value"]] = deepcopy(
+                DEFAULT_LAYOUTS[current_type["value"]]
+            )
+            selected_index["value"] = None
+            refresh_elements()
+
+        def save_layout():
+            if self.show_changes_blocked(window):
+                return
+            previous = self.settings.get("PDF_Layouts")
+            self.settings["PDF_Layouts"] = deepcopy(layouts)
+            try:
+                self.save_settings()
+            except OSError as exc:
+                if previous is None:
+                    self.settings.pop("PDF_Layouts", None)
+                else:
+                    self.settings["PDF_Layouts"] = previous
+                messagebox.showerror(
+                    "Save failed",
+                    f"Could not save PDF layouts:\n{exc}",
+                    parent=window,
+                )
+                return
+            messagebox.showinfo("Saved", "PDF layout saved.", parent=window)
+
+        def preview_pdf():
+            preview_data = {
+                "number": "PREVIEW-001",
+                "name": "PDF layout preview",
+                "status": "order"
+                if current_type["value"] != "quote"
+                else "quote",
+                "customer": {
+                    "name": "Sample Customer",
+                    "address": "Sample address",
+                    "contact": "Sample contact",
+                },
+                "items": [
+                    {
+                        "name": "Sample item",
+                        "quantity": 2,
+                        "drawing_number": "DWG-001",
+                        "revision": "A",
+                        "material": "Aluminium",
+                        "material_cost": 10,
+                        "operations": [],
+                    }
+                ],
+            }
+            preview_directory = tempfile.mkdtemp(prefix="wyceny_pdf_preview_")
+            preview_settings = deepcopy(self.settings)
+            preview_settings["PDF_Layouts"] = deepcopy(layouts)
+            preview_settings["Pdf_Output_Directory"] = preview_directory
+            try:
+                preview_path = generate_layout_document(
+                    current_type["value"],
+                    preview_data,
+                    preview_settings,
+                )
+                os.startfile(preview_path)
+            except (OSError, RuntimeError, ValueError) as exc:
+                messagebox.showerror(
+                    "Preview failed",
+                    f"Could not create the PDF preview:\n{exc}",
+                    parent=window,
+                )
+
+        def draw_preview():
+            canvas.delete("all")
+            canvas.update_idletasks()
+            scale = min(
+                max(300, canvas.winfo_width() - 36) / PAGE_WIDTH,
+                max(400, canvas.winfo_height() - 36) / PAGE_HEIGHT,
+            )
+            page_width = PAGE_WIDTH * scale
+            page_height = PAGE_HEIGHT * scale
+            page_x = (canvas.winfo_width() - page_width) / 2
+            page_y = (canvas.winfo_height() - page_height) / 2
+            page_geometry.update(x=page_x, y=page_y, scale=scale)
+            canvas.create_rectangle(
+                page_x,
+                page_y,
+                page_x + page_width,
+                page_y + page_height,
+                fill="white",
+                outline="#94A3B8",
+            )
+            for index, element in enumerate(elements()):
+                x = page_x + float(element.get("x", 0)) * scale
+                y = page_y + float(element.get("y", 0)) * scale
+                width = float(element.get("w", 60)) * scale
+                height = float(element.get("h", 18)) * scale
+                selected = index == selected_index["value"]
+                canvas.create_rectangle(
+                    x,
+                    y,
+                    x + width,
+                    y + height,
+                    fill="#EFF6FF" if selected else "#F8FAFC",
+                    outline="#2563EB" if selected else "#94A3B8",
+                    width=2 if selected else 1,
+                    tags=(f"element:{index}",),
+                )
+                canvas.create_text(
+                    x + 4,
+                    y + 3,
+                    text=element_label(element),
+                    anchor=tk.NW,
+                    fill=element.get("color", "#111827"),
+                    width=max(5, width - 8),
+                    tags=(f"element:{index}",),
+                )
+            canvas.create_text(
+                page_x + 6,
+                page_y + page_height + 8,
+                text="A4 • 210 × 297 mm",
+                anchor=tk.NW,
+                fill="#475569",
+                font=("Arial", 8),
+            )
+
+        def select_element(event=None):
+            selection = element_list.curselection()
+            selected_index["value"] = selection[0] if selection else None
+            load_selected()
+            draw_preview()
+
+        def canvas_position(event):
+            return (
+                (event.x - page_geometry["x"]) / page_geometry["scale"],
+                (event.y - page_geometry["y"]) / page_geometry["scale"],
+            )
+
+        def start_drag(event):
+            closest = canvas.find_closest(event.x, event.y)
+            tags = canvas.gettags(closest[0]) if closest else ()
+            index = next(
+                (
+                    int(tag.split(":", 1)[1])
+                    for tag in tags
+                    if tag.startswith("element:")
+                ),
+                None,
+            )
+            if index is None or index >= len(elements()):
+                return
+            selected_index["value"] = index
+            x, y = canvas_position(event)
+            element = elements()[index]
+            drag_state.update(
+                index=index,
+                dx=x - float(element.get("x", 0)),
+                dy=y - float(element.get("y", 0)),
+            )
+            element_list.selection_clear(0, tk.END)
+            element_list.selection_set(index)
+            load_selected()
+            draw_preview()
+
+        def drag(event):
+            index = drag_state["index"]
+            if index is None or index >= len(elements()):
+                return
+            x, y = canvas_position(event)
+            element = elements()[index]
+            element["x"] = max(
+                0,
+                min(PAGE_WIDTH - float(element.get("w", 1)), x - drag_state["dx"]),
+            )
+            element["y"] = max(
+                0,
+                min(PAGE_HEIGHT - float(element.get("h", 1)), y - drag_state["dy"]),
+            )
+            load_selected()
+            draw_preview()
+
+        def stop_drag(event):
+            drag_state["index"] = None
+
+        def change_document(event=None):
+            current_type["value"] = document_types[selected_document.get()]
+            selected_index["value"] = None
+            add_choice["values"] = tuple(
+                label for _, label in FIELD_CATALOG[current_type["value"]]
+                if label not in ("Quoted items and prices", "Delivery items")
+            )
+            add_choice.set("")
+            refresh_elements()
+
+        add_choice["values"] = tuple(
+            label for _, label in FIELD_CATALOG[current_type["value"]]
+            if label not in ("Quoted items and prices", "Delivery items")
+        )
+        add_choice.bind(
+            "<<ComboboxSelected>>",
+            lambda event: add_button.configure(
+                text="Add text"
+                if add_choice.get() == "Custom text"
+                else "Add field"
+            ),
+        )
+        add_button.configure(
+            command=lambda: (
+                add_custom_text()
+                if add_choice.get() == "Custom text"
+                else add_field_from_choice()
+            )
+        )
+
+        def add_field_from_choice():
+            selected_label = add_choice.get()
+            field = next(
+                (
+                    field
+                    for field, label in FIELD_CATALOG[current_type["value"]]
+                    if label == selected_label
+                ),
+                None,
+            )
+            if field and field not in ("items_table", "custom_table", "custom_text"):
+                add_element(field)
+
+        element_list.bind("<<ListboxSelect>>", select_element)
+        document_choice.bind("<<ComboboxSelected>>", change_document)
+        canvas.bind("<Button-1>", start_drag)
+        canvas.bind("<B1-Motion>", drag)
+        canvas.bind("<ButtonRelease-1>", stop_drag)
+        canvas.bind("<Configure>", lambda event: draw_preview())
+        refresh_elements()
+
     def open_pdf_layout_editor(self, parent):
         layouts = get_layouts(self.settings)
         window = tk.Toplevel(parent)
@@ -2010,9 +2713,38 @@ class CncQuotesApp:
         )
         canvas.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
 
-        controls = tk.Frame(body, width=340)
-        controls.pack(side=tk.RIGHT, fill=tk.Y)
-        controls.pack_propagate(False)
+        controls_container = tk.Frame(body, width=340)
+        controls_container.pack(side=tk.RIGHT, fill=tk.Y)
+        controls_container.pack_propagate(False)
+        controls_canvas = tk.Canvas(
+            controls_container,
+            width=320,
+            highlightthickness=0,
+        )
+        controls_scrollbar = ttk.Scrollbar(
+            controls_container,
+            orient=tk.VERTICAL,
+            command=controls_canvas.yview,
+        )
+        controls_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        controls_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        controls_canvas.configure(yscrollcommand=controls_scrollbar.set)
+        controls = tk.Frame(controls_canvas, width=320)
+        controls_window = controls_canvas.create_window(
+            (0, 0),
+            window=controls,
+            anchor="nw",
+            width=320,
+        )
+
+        def update_controls_scrollregion(event=None):
+            controls_canvas.configure(scrollregion=controls_canvas.bbox("all"))
+
+        def resize_controls(event):
+            controls_canvas.itemconfigure(controls_window, width=event.width)
+
+        controls.bind("<Configure>", update_controls_scrollregion)
+        controls_canvas.bind("<Configure>", resize_controls)
         catalog_frame = tk.LabelFrame(controls, text="Add information", padx=8, pady=8)
         catalog_frame.pack(fill=tk.X, pady=(0, 8))
         catalog_choice = ttk.Combobox(catalog_frame, state="readonly", width=33)
@@ -2079,11 +2811,41 @@ class CncQuotesApp:
         remove_button.grid(row=10, column=2, sticky="ew", padx=(4, 0), pady=(6, 0))
         table_columns_frame = tk.LabelFrame(
             element_frame,
-            text="Table columns (select fields)",
+            text="Table columns",
             padx=4,
             pady=4,
         )
         table_columns_frame.grid(row=11, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+        table_lines_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            table_columns_frame,
+            text="Show table lines",
+            variable=table_lines_var,
+            command=lambda: update_selected(
+                {"show_table_lines": table_lines_var.get()}
+            ),
+        ).pack(anchor=tk.W, pady=(0, 4))
+        tk.Label(table_columns_frame, text="Available fields").pack(anchor=tk.W)
+        table_available_list = tk.Listbox(
+            table_columns_frame,
+            height=4,
+            selectmode=tk.MULTIPLE,
+            exportselection=False,
+        )
+        table_available_list.pack(fill=tk.X, expand=True)
+        table_column_buttons = tk.Frame(table_columns_frame)
+        table_column_buttons.pack(fill=tk.X, pady=3)
+        add_table_column_button = tk.Button(
+            table_column_buttons,
+            text="Add selected",
+        )
+        add_table_column_button.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 2))
+        remove_table_column_button = tk.Button(
+            table_column_buttons,
+            text="Remove selected",
+        )
+        remove_table_column_button.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(2, 0))
+        tk.Label(table_columns_frame, text="Included fields").pack(anchor=tk.W)
         table_columns_list = tk.Listbox(
             table_columns_frame,
             height=5,
@@ -2091,6 +2853,16 @@ class CncQuotesApp:
             exportselection=False,
         )
         table_columns_list.pack(fill=tk.X, expand=True)
+        table_width_frame = tk.Frame(table_columns_frame)
+        table_width_frame.pack(fill=tk.X, pady=(4, 0))
+        tk.Label(table_width_frame, text="Selected field width (%):").pack(side=tk.LEFT)
+        table_width_entry = tk.Entry(table_width_frame, width=8, justify="right")
+        table_width_entry.pack(side=tk.LEFT, padx=(5, 3))
+        apply_table_width_button = tk.Button(
+            table_width_frame,
+            text="Apply width",
+        )
+        apply_table_width_button.pack(side=tk.LEFT)
         apply_table_columns_button = tk.Button(
             table_columns_frame,
             text="Apply table columns",
@@ -2164,15 +2936,21 @@ class CncQuotesApp:
                 None,
             )
             add_field_button.configure(
-                text="Add items table" if selected_field == "items_table" else "Add field"
+                text=(
+                    "Insert table"
+                    if selected_field in ("items_table", "custom_table")
+                    else "Add field"
+                )
             )
 
         def clear_properties():
             for entry in properties.values():
                 entry.delete(0, tk.END)
+            table_width_entry.delete(0, tk.END)
             font_choice.set("")
             style_choice.set("")
             visible_var.set(False)
+            table_lines_var.set(True)
             color_button.configure(bg=element_frame.cget("bg"))
 
         def load_properties():
@@ -2189,8 +2967,10 @@ class CncQuotesApp:
             style_choice.set(element.get("style", ""))
             visible_var.set(bool(element.get("visible", True)))
             color_button.configure(bg=element.get("color", "#111827"))
+            table_lines_var.set(bool(element.get("show_table_lines", True)))
             if element.get("field") == "items_table":
                 table_columns_frame.grid()
+                table_available_list.delete(0, tk.END)
                 table_columns_list.delete(0, tk.END)
                 column_catalog = TABLE_COLUMN_CATALOG[current_type["value"]]
                 selected_columns = element.get(
@@ -2198,11 +2978,14 @@ class CncQuotesApp:
                     DEFAULT_TABLE_COLUMNS[current_type["value"]],
                 )
                 for column, label in column_catalog:
-                    table_columns_list.insert(tk.END, label)
                     if column in selected_columns:
-                        table_columns_list.selection_set(tk.END)
+                        table_columns_list.insert(tk.END, label)
+                    else:
+                        table_available_list.insert(tk.END, label)
+                update_table_width_entry()
             else:
                 table_columns_frame.grid_remove()
+                table_width_entry.delete(0, tk.END)
 
         def draw_preview():
             canvas.delete("all")
@@ -2252,6 +3035,13 @@ class CncQuotesApp:
                     visible_columns = [
                         column for column in table_columns if column in column_labels
                     ]
+                    show_table_lines = bool(element.get("show_table_lines", True))
+                    column_weights = get_table_column_widths(
+                        current_type["value"],
+                        element,
+                        visible_columns,
+                    )
+                    total_weight = sum(column_weights.values())
                     canvas.create_text(
                         x + 4,
                         y + 2,
@@ -2264,10 +3054,14 @@ class CncQuotesApp:
                     grid_y = y + min(height * 0.28, 16 * scale)
                     grid_height = max(3, (height - (grid_y - y)) / 3)
                     if visible_columns:
-                        column_width = width / len(visible_columns)
+                        column_widths = [
+                            width * column_weights[column] / total_weight
+                            for column in visible_columns
+                        ]
+                        cell_x = x
                         for row_index in range(3):
-                            for column_index, column in enumerate(visible_columns):
-                                cell_x = x + column_index * column_width
+                            cell_x = x
+                            for column, column_width in zip(visible_columns, column_widths):
                                 cell_y = grid_y + row_index * grid_height
                                 canvas.create_rectangle(
                                     cell_x,
@@ -2275,7 +3069,7 @@ class CncQuotesApp:
                                     cell_x + column_width,
                                     cell_y + grid_height,
                                     fill="#E2E8F0" if row_index == 0 else "white",
-                                    outline="#94A3B8",
+                                    outline="#94A3B8" if show_table_lines else "",
                                     tags=(f"layout:{index}",),
                                 )
                                 if row_index == 0:
@@ -2289,6 +3083,77 @@ class CncQuotesApp:
                                         width=max(4, column_width - 4),
                                         tags=(f"layout:{index}",),
                                     )
+                                cell_x += column_width
+                    continue
+                if element["field"] == "custom_table":
+                    cells = element.get("custom_cells", [])
+                    headers = (
+                        cells[0]
+                        if isinstance(cells, list) and cells and isinstance(cells[0], list)
+                        else element.get("custom_headers", [])
+                    )
+                    canvas.create_text(
+                        x + 4,
+                        y + 2,
+                        text=label or "Custom table",
+                        anchor="nw",
+                        fill=color,
+                        font=("Arial", max(6, min(12, int(element.get("font_size", 10) * scale * 0.75)))),
+                        tags=(f"layout:{index}",),
+                    )
+                    if headers:
+                        grid_y = y + min(height * 0.28, 16 * scale)
+                        grid_height = max(3, (height - (grid_y - y)) / 3)
+                        saved_widths = element.get("column_widths", {})
+                        if not isinstance(saved_widths, dict):
+                            saved_widths = {}
+                        column_weights = []
+                        for column_index in range(len(headers)):
+                            try:
+                                column_weight = float(
+                                    saved_widths.get(f"custom_{column_index}", 1)
+                                )
+                            except (TypeError, ValueError):
+                                column_weight = 1
+                            column_weights.append(
+                                column_weight if column_weight > 0 else 1
+                            )
+                        total_weight = sum(column_weights)
+                        column_widths = [
+                            width * column_weight / total_weight
+                            for column_weight in column_weights
+                        ]
+                        for row_index in range(3):
+                            cell_x = x
+                            for column_index, (header, column_width) in enumerate(
+                                zip(headers, column_widths)
+                            ):
+                                cell_y = grid_y + row_index * grid_height
+                                canvas.create_rectangle(
+                                    cell_x,
+                                    cell_y,
+                                    cell_x + column_width,
+                                    cell_y + grid_height,
+                                    fill="#E2E8F0" if row_index == 0 else "white",
+                                    outline=(
+                                        "#94A3B8"
+                                        if element.get("show_table_lines", True)
+                                        else ""
+                                    ),
+                                    tags=(f"layout:{index}",),
+                                )
+                                if row_index == 0:
+                                    canvas.create_text(
+                                        cell_x + 2,
+                                        cell_y + 2,
+                                        text=header,
+                                        anchor="nw",
+                                        fill=color,
+                                        font=("Arial", max(5, min(9, int(7 * scale)))),
+                                        width=max(4, column_width - 4),
+                                        tags=(f"layout:{index}",),
+                                    )
+                                cell_x += column_width
                     continue
                 sample = "" if element["field"] == "company_logo" else f"\n{label}"
                 canvas.create_text(
@@ -2365,10 +3230,13 @@ class CncQuotesApp:
 
         def add_field():
             field_name = catalog_choice.get()
-            options = dict(FIELD_CATALOG[current_type["value"]])
-            if field_name not in options:
+            fields = FIELD_CATALOG[current_type["value"]]
+            if field_name not in {label for _, label in fields}:
                 return
-            field = next(key for key, label in FIELD_CATALOG[current_type["value"]] if label == field_name)
+            field = next(key for key, label in fields if label == field_name)
+            if field in ("items_table", "custom_table"):
+                open_table_wizard(field)
+                return
             index = len(current_elements())
             current_elements().append(
                 {
@@ -2405,20 +3273,363 @@ class CncQuotesApp:
             element = current_elements()[index]
             if element.get("field") != "items_table":
                 return
-            selected_indices = table_columns_list.curselection()
-            if not selected_indices:
+            selected_labels = [
+                table_columns_list.get(index)
+                for index in range(table_columns_list.size())
+            ]
+            if not selected_labels:
                 messagebox.showwarning(
                     "Table columns required",
-                    "Select at least one field for the table.",
+                    "Add at least one field to the table.",
                     parent=window,
                 )
                 return
             column_catalog = TABLE_COLUMN_CATALOG[current_type["value"]]
-            element["table_columns"] = [
-                column_catalog[column_index][0]
-                for column_index in selected_indices
+            labels_to_columns = dict((label, column) for column, label in column_catalog)
+            columns = [
+                labels_to_columns[label]
+                for label in selected_labels
             ]
+            element["table_columns"] = columns
+            existing_widths = get_table_column_widths(
+                current_type["value"],
+                element,
+                columns,
+            )
+            element["column_widths"] = existing_widths
             refresh_list()
+
+        def current_table_columns():
+            labels_to_columns = dict(
+                (label, column)
+                for column, label in TABLE_COLUMN_CATALOG[current_type["value"]]
+            )
+            return [
+                labels_to_columns[table_columns_list.get(index)]
+                for index in range(table_columns_list.size())
+            ]
+
+        def update_table_width_entry(event=None):
+            selected_indices = table_columns_list.curselection()
+            table_width_entry.delete(0, tk.END)
+            index = selected_element["index"]
+            if (
+                len(selected_indices) != 1
+                or index is None
+                or index >= len(current_elements())
+            ):
+                return
+            element = current_elements()[index]
+            columns = current_table_columns()
+            labels_to_columns = dict(
+                (label, column)
+                for column, label in TABLE_COLUMN_CATALOG[current_type["value"]]
+            )
+            column = labels_to_columns[table_columns_list.get(selected_indices[0])]
+            if column not in columns:
+                return
+            widths = get_table_column_widths(
+                current_type["value"],
+                element,
+                columns,
+            )
+            total_width = sum(widths.values())
+            table_width_entry.insert(
+                0,
+                f"{widths[column] / total_width * 100:.2f}",
+            )
+
+        def apply_table_width():
+            selected_indices = table_columns_list.curselection()
+            index = selected_element["index"]
+            if len(selected_indices) != 1 or index is None:
+                messagebox.showwarning(
+                    "Select a column",
+                    "Select one included column before applying its width.",
+                    parent=window,
+                )
+                return
+            try:
+                width = float(table_width_entry.get().replace(",", "."))
+                if not math.isfinite(width) or width <= 0 or width > 100:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror(
+                    "Invalid column width",
+                    "Column width must be a number between 0 and 100.",
+                    parent=window,
+                )
+                return
+            element = current_elements()[index]
+            columns = current_table_columns()
+            if not columns:
+                return
+            labels_to_columns = dict(
+                (label, column)
+                for column, label in TABLE_COLUMN_CATALOG[current_type["value"]]
+            )
+            column = labels_to_columns[table_columns_list.get(selected_indices[0])]
+            widths = get_table_column_widths(
+                current_type["value"],
+                element,
+                columns,
+            )
+            total_width = sum(widths.values())
+            if len(columns) == 1:
+                widths[column] = 1.0
+            else:
+                other_width = total_width - widths[column]
+                if width >= 100:
+                    messagebox.showerror(
+                        "Invalid column width",
+                        "A table with multiple columns cannot assign 100% to one column.",
+                        parent=window,
+                    )
+                    return
+                widths[column] = other_width * width / (100 - width)
+            element["column_widths"] = widths
+            element["table_columns"] = columns
+            draw_preview()
+
+        def open_table_wizard(table_kind):
+            wizard = tk.Toplevel(window)
+            wizard.title(
+                "Items table wizard"
+                if table_kind == "items_table"
+                else "Custom table wizard"
+            )
+            wizard.geometry("460x520")
+            wizard.transient(window)
+            wizard.grab_set()
+
+            content = tk.Frame(wizard, padx=12, pady=12)
+            content.pack(fill=tk.BOTH, expand=True)
+            lines_var = tk.BooleanVar(value=True)
+            tk.Checkbutton(
+                content,
+                text="Show table lines",
+                variable=lines_var,
+            ).pack(anchor=tk.W, pady=(0, 8))
+
+            if table_kind == "items_table":
+                tk.Label(
+                    content,
+                    text="Select the columns to include:",
+                    anchor=tk.W,
+                ).pack(fill=tk.X)
+                column_list = tk.Listbox(
+                    content,
+                    selectmode=tk.MULTIPLE,
+                    exportselection=False,
+                    height=12,
+                )
+                column_list.pack(fill=tk.BOTH, expand=True, pady=6)
+                catalog = TABLE_COLUMN_CATALOG[current_type["value"]]
+                defaults = DEFAULT_TABLE_COLUMNS[current_type["value"]]
+                for index, (column, label) in enumerate(catalog):
+                    column_list.insert(tk.END, label)
+                    if column in defaults:
+                        column_list.selection_set(index)
+            else:
+                wizard.geometry("760x640")
+                size_frame = tk.Frame(content)
+                size_frame.pack(fill=tk.X, pady=(0, 8))
+                tk.Label(size_frame, text="Rows:").pack(side=tk.LEFT)
+                row_count = tk.Spinbox(size_frame, from_=1, to=20, width=5)
+                row_count.delete(0, tk.END)
+                row_count.insert(0, "3")
+                row_count.pack(side=tk.LEFT, padx=(4, 14))
+                tk.Label(size_frame, text="Columns:").pack(side=tk.LEFT)
+                column_count = tk.Spinbox(size_frame, from_=1, to=12, width=5)
+                column_count.delete(0, tk.END)
+                column_count.insert(0, "3")
+                column_count.pack(side=tk.LEFT, padx=4)
+
+                table_canvas = tk.Canvas(content, highlightthickness=0)
+                table_scrollbar = ttk.Scrollbar(
+                    content,
+                    orient=tk.VERTICAL,
+                    command=table_canvas.yview,
+                )
+                table_canvas.configure(yscrollcommand=table_scrollbar.set)
+                table_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+                table_canvas.pack(fill=tk.BOTH, expand=True)
+                table_editor = tk.Frame(table_canvas)
+                table_canvas.create_window((0, 0), window=table_editor, anchor=tk.NW)
+                table_editor.bind(
+                    "<Configure>",
+                    lambda event: table_canvas.configure(
+                        scrollregion=table_canvas.bbox("all")
+                    ),
+                )
+                cell_entries = []
+                column_width_entries = []
+                row_height_entries = []
+
+                def build_table_grid():
+                    try:
+                        rows = int(row_count.get())
+                        columns = int(column_count.get())
+                        if rows < 1 or columns < 1:
+                            raise ValueError
+                    except ValueError:
+                        messagebox.showerror(
+                            "Invalid table size",
+                            "Rows and columns must be positive whole numbers.",
+                            parent=wizard,
+                        )
+                        return
+                    for child in table_editor.winfo_children():
+                        child.destroy()
+                    cell_entries.clear()
+                    column_width_entries.clear()
+                    row_height_entries.clear()
+                    tk.Label(table_editor, text="Row height (mm)").grid(
+                        row=0,
+                        column=0,
+                        padx=3,
+                        pady=3,
+                    )
+                    for column in range(columns):
+                        width_frame = tk.Frame(table_editor)
+                        width_frame.grid(row=0, column=column + 1, padx=2, pady=3)
+                        tk.Label(width_frame, text=f"Column {column + 1} (%)").pack()
+                        width_entry = tk.Entry(width_frame, width=10, justify="right")
+                        width_entry.insert(0, f"{100 / columns:.2f}")
+                        width_entry.pack()
+                        column_width_entries.append(width_entry)
+                    for row in range(rows):
+                        height_entry = tk.Entry(table_editor, width=12, justify="right")
+                        height_entry.insert(0, "8")
+                        height_entry.grid(row=row + 1, column=0, padx=3, pady=3)
+                        row_height_entries.append(height_entry)
+                        row_entries = []
+                        for column in range(columns):
+                            entry = tk.Entry(table_editor, width=20)
+                            entry.grid(row=row + 1, column=column + 1, padx=2, pady=3)
+                            row_entries.append(entry)
+                        cell_entries.append(row_entries)
+
+                tk.Button(
+                    size_frame,
+                    text="Create grid",
+                    command=build_table_grid,
+                ).pack(side=tk.LEFT, padx=12)
+                build_table_grid()
+
+            buttons = tk.Frame(wizard, padx=12, pady=8)
+            buttons.pack(fill=tk.X)
+
+            def finish():
+                element = {
+                    "id": f"{table_kind}-{len(current_elements()) + 1}",
+                    "field": table_kind,
+                    "label": "",
+                    "x": 15,
+                    "y": min(245, 15 + len(current_elements()) * 8),
+                    "w": 180,
+                    "h": 60,
+                    "font_size": 9,
+                    "font": "Arial",
+                    "style": "",
+                    "color": "#111827",
+                    "visible": True,
+                    "show_table_lines": lines_var.get(),
+                }
+                if table_kind == "items_table":
+                    selected = column_list.curselection()
+                    if not selected:
+                        messagebox.showwarning(
+                            "Columns required",
+                            "Select at least one table column.",
+                            parent=wizard,
+                        )
+                        return
+                    catalog = TABLE_COLUMN_CATALOG[current_type["value"]]
+                    element["table_columns"] = [
+                        catalog[index][0]
+                        for index in selected
+                    ]
+                else:
+                    try:
+                        column_widths = [
+                            float(entry.get().replace(",", "."))
+                            for entry in column_width_entries
+                        ]
+                        row_heights = [
+                            float(entry.get().replace(",", "."))
+                            for entry in row_height_entries
+                        ]
+                        if (
+                            any(width <= 0 for width in column_widths)
+                            or any(height <= 0 for height in row_heights)
+                        ):
+                            raise ValueError
+                    except ValueError:
+                        messagebox.showerror(
+                            "Invalid table size",
+                            "Column widths and row heights must be positive numbers.",
+                            parent=wizard,
+                        )
+                        return
+                    element["custom_cells"] = [
+                        [entry.get().strip() for entry in row]
+                        for row in cell_entries
+                    ]
+                    element["column_widths"] = {
+                        f"custom_{index}": width
+                        for index, width in enumerate(column_widths)
+                    }
+                    element["row_heights"] = row_heights
+                current_elements().append(element)
+                selected_element["index"] = len(current_elements()) - 1
+                wizard.destroy()
+                refresh_list()
+
+            tk.Button(
+                buttons,
+                text="Create table",
+                command=finish,
+                bg="#2563EB",
+                fg="white",
+            ).pack(side=tk.RIGHT, padx=(6, 0))
+            tk.Button(
+                buttons,
+                text="Cancel",
+                command=wizard.destroy,
+            ).pack(side=tk.RIGHT)
+
+        def add_table_columns():
+            selected_labels = [
+                table_available_list.get(index)
+                for index in table_available_list.curselection()
+            ]
+            for label in selected_labels:
+                table_columns_list.insert(tk.END, label)
+            for index in reversed(table_available_list.curselection()):
+                table_available_list.delete(index)
+            apply_table_columns()
+
+        def remove_table_columns():
+            selected_indices = table_columns_list.curselection()
+            if not selected_indices:
+                return
+            if len(selected_indices) == table_columns_list.size():
+                messagebox.showwarning(
+                    "Table columns required",
+                    "Keep at least one field in the table.",
+                    parent=window,
+                )
+                return
+            removed_labels = [
+                table_columns_list.get(index)
+                for index in selected_indices
+            ]
+            for label in removed_labels:
+                table_available_list.insert(tk.END, label)
+            for index in reversed(selected_indices):
+                table_columns_list.delete(index)
+            apply_table_columns()
 
         def remove_field():
             index = selected_element["index"]
@@ -2469,6 +3680,7 @@ class CncQuotesApp:
                     "drawing_number": "DWG-1001",
                     "revision": "A",
                     "quantity": 5,
+                    "markup": 15,
                     "material": "Aluminium",
                     "material_cost": 12.5,
                     "supplier": "Sample Supplier",
@@ -2495,6 +3707,7 @@ class CncQuotesApp:
                     "drawing_number": "DWG-1002",
                     "revision": "B",
                     "quantity": 2,
+                    "markup": 15,
                     "material": "Mild Steel",
                     "material_cost": 8.0,
                     "supplier": "Sample Supplier",
@@ -2524,7 +3737,6 @@ class CncQuotesApp:
                     "phone": "01234 567890",
                     "email": "alex@example.com",
                 },
-                "markup": 15,
                 "discount": 5,
                 "items": preview_items,
             }
@@ -2611,7 +3823,11 @@ class CncQuotesApp:
         document_choice.bind("<<ComboboxSelected>>", change_document)
         add_field_button.configure(command=add_field)
         catalog_choice.bind("<<ComboboxSelected>>", update_add_button_text)
+        add_table_column_button.configure(command=add_table_columns)
+        remove_table_column_button.configure(command=remove_table_columns)
         apply_table_columns_button.configure(command=apply_table_columns)
+        apply_table_width_button.configure(command=apply_table_width)
+        table_columns_list.bind("<<ListboxSelect>>", update_table_width_entry)
         apply_button.configure(command=apply_properties)
         remove_button.configure(command=remove_field)
         color_button.configure(command=choose_color)
@@ -3068,6 +4284,12 @@ class CncQuotesApp:
         ent_quantity.insert(0, str(item_data.get("quantity", 1) if is_editing else 1))
         self.clear_zero_on_click(ent_quantity)
 
+        tk.Label(info_frame, text="Markup (%):").grid(row=5, column=0, sticky="e", pady=5)
+        ent_markup = tk.Entry(info_frame, width=10, justify="right")
+        ent_markup.grid(row=5, column=1, padx=10, pady=5, sticky="w")
+        ent_markup.insert(0, str(self.get_item_markup(item_data)))
+        self.clear_zero_on_click(ent_markup)
+
         if is_editing:
             ent_item_name.insert(0, item_data.get("name", ""))
             ent_drawing_number.insert(0, item_data.get("drawing_number", ""))
@@ -3220,6 +4442,7 @@ class CncQuotesApp:
                 quantity = max(1, int(ent_quantity.get().strip()))
             except ValueError:
                 quantity = 1
+            markup = self.get_item_markup({"markup": ent_markup.get().strip().replace(",", ".")})
             item_total = material_cost
             for line_number, op in enumerate(temp_operations, start=1):
                 item_total += float(op["cost"])
@@ -3232,8 +4455,9 @@ class CncQuotesApp:
 
             lbl_item_total.config(
                 text=(
-                    f"Unit Price: {item_total:.2f} | "
-                    f"Line Total ({quantity} x unit price): {item_total * quantity:.2f}"
+                    f"Unit Price: {item_total * (1 + markup / 100):.2f} | "
+                    f"Line Total ({quantity} x unit price): "
+                    f"{item_total * quantity * (1 + markup / 100):.2f}"
                 )
             )
             if resize_window:
@@ -3251,6 +4475,8 @@ class CncQuotesApp:
         ent_material_cost.bind("<FocusOut>", lambda event: refresh_operations())
         ent_quantity.bind("<KeyRelease>", lambda event: refresh_operations())
         ent_quantity.bind("<FocusOut>", lambda event: refresh_operations())
+        ent_markup.bind("<KeyRelease>", lambda event: refresh_operations())
+        ent_markup.bind("<FocusOut>", lambda event: refresh_operations())
 
         def add_operation():
             if self.show_changes_blocked(win):
@@ -3328,6 +4554,18 @@ class CncQuotesApp:
                 )
                 return
 
+            try:
+                markup = float(ent_markup.get().strip().replace(",", ".") or 0)
+                if not math.isfinite(markup) or markup < 0:
+                    raise ValueError
+            except ValueError:
+                messagebox.showwarning(
+                    "Error",
+                    "Markup must be a non-negative number.",
+                    parent=win,
+                )
+                return
+
             quantity_text = ent_quantity.get().strip()
             try:
                 quantity = int(quantity_text)
@@ -3370,6 +4608,7 @@ class CncQuotesApp:
                 "drawing_number": ent_drawing_number.get().strip(),
                 "revision": ent_revision.get().strip(),
                 "quantity": quantity,
+                "markup": markup,
                 "material": ent_material.get().strip(),
                 "material_cost": material_cost,
                 "supplier": cb_supplier.get().strip(),
@@ -3461,7 +4700,6 @@ class CncQuotesApp:
                 temp_items[0].setdefault("revision", quote_data.get("revision", ""))
 
         var_discount = tk.StringVar(value=str(quote_data.get("discount", 0.0)) if quote_data else "0")
-        var_markup = tk.StringVar(value=str(quote_data.get("markup", 0.0)) if quote_data else "0")
         order_status_var = tk.StringVar(
             value=(
                 "Pending"
@@ -3784,6 +5022,7 @@ class CncQuotesApp:
             "material",
             "material_cost",
             "supplier",
+            "markup",
             "unit_price",
             "cost",
         )
@@ -3805,6 +5044,7 @@ class CncQuotesApp:
         items_tree.heading("material", text="Required Material")
         items_tree.heading("material_cost", text="Material / Unit")
         items_tree.heading("supplier", text="Supplier")
+        items_tree.heading("markup", text="Markup (%)")
         items_tree.heading("unit_price", text="Unit Price ex VAT")
         items_tree.heading("cost", text="Line Total ex VAT")
 
@@ -3816,6 +5056,7 @@ class CncQuotesApp:
         items_tree.column("material", width=170)
         items_tree.column("material_cost", width=110, anchor=tk.E)
         items_tree.column("supplier", width=150)
+        items_tree.column("markup", width=95, anchor=tk.E)
         items_tree.column("unit_price", width=110, anchor=tk.E)
         items_tree.column("cost", width=130, anchor=tk.E)
         items_vertical_scrollbar = ttk.Scrollbar(
@@ -3839,17 +5080,7 @@ class CncQuotesApp:
         totals_frame = tk.Frame(items_frame)
         totals_frame.pack(side=tk.RIGHT, padx=10, pady=10)
 
-        tk.Label(totals_frame, text="Markup (%):").grid(row=0, column=0, sticky="e", pady=2)
-        ent_markup = tk.Entry(
-            totals_frame,
-            width=8,
-            textvariable=var_markup,
-            justify="right",
-            state="readonly" if is_order else "normal",
-        )
-        ent_markup.grid(row=0, column=1, sticky="e", pady=2)
-
-        tk.Label(totals_frame, text="Discount (%):").grid(row=1, column=0, sticky="e", pady=2)
+        tk.Label(totals_frame, text="Discount (%):").grid(row=0, column=0, sticky="e", pady=2)
         ent_discount = tk.Entry(
             totals_frame,
             width=8,
@@ -3857,24 +5088,23 @@ class CncQuotesApp:
             justify="right",
             state="readonly" if is_order else "normal",
         )
-        ent_discount.grid(row=1, column=1, sticky="e", pady=2)
+        ent_discount.grid(row=0, column=1, sticky="e", pady=2)
         if not is_order:
-            self.clear_zero_on_click(ent_markup)
             self.clear_zero_on_click(ent_discount)
 
         lbl_subtotal = tk.Label(totals_frame, text="Subtotal: 0.00")
         lbl_markup_amount = tk.Label(totals_frame, text="Markup Amount: 0.00")
-        lbl_markup_amount.grid(row=2, column=0, columnspan=2, sticky="e", pady=2)
-        lbl_subtotal.grid(row=3, column=0, columnspan=2, sticky="e", pady=2)
+        lbl_markup_amount.grid(row=1, column=0, columnspan=2, sticky="e", pady=2)
+        lbl_subtotal.grid(row=2, column=0, columnspan=2, sticky="e", pady=2)
 
         lbl_net = tk.Label(totals_frame, text="Net Total: 0.00")
-        lbl_net.grid(row=4, column=0, columnspan=2, sticky="e", pady=2)
+        lbl_net.grid(row=3, column=0, columnspan=2, sticky="e", pady=2)
 
         lbl_vat = tk.Label(totals_frame, text="VAT Amount: 0.00")
-        lbl_vat.grid(row=5, column=0, columnspan=2, sticky="e", pady=2)
+        lbl_vat.grid(row=4, column=0, columnspan=2, sticky="e", pady=2)
 
         lbl_gross = tk.Label(totals_frame, text="Gross Total: 0.00", font=("Arial", 11, "bold"))
-        lbl_gross.grid(row=6, column=0, columnspan=2, sticky="e", pady=5)
+        lbl_gross.grid(row=5, column=0, columnspan=2, sticky="e", pady=5)
 
         def refresh_items_and_totals(*args):
             selected_work_item = (
@@ -3890,10 +5120,7 @@ class CncQuotesApp:
                     float(op["cost"]) for op in item.get("operations", [])
                 )
                 quantity = int(item.get("quantity", 1) or 1)
-                try:
-                    markup_val = float(var_markup.get().replace(",", ".") or 0)
-                except ValueError:
-                    markup_val = 0.0
+                markup_val = self.get_item_markup(item)
                 unit_price = unit_cost * (1 + markup_val / 100.0)
                 line_total = unit_price * quantity
                 items_tree.insert(
@@ -3910,6 +5137,7 @@ class CncQuotesApp:
                         item.get("material", ""),
                         f"{float(item.get('material_cost', 0) or 0):.2f}",
                         item.get("supplier", ""),
+                        f"{markup_val:.2f}",
                         f"{unit_price:.2f}",
                         f"{line_total:.2f}",
                     ),
@@ -3919,15 +5147,9 @@ class CncQuotesApp:
                 discount_val = float(var_discount.get().replace(',', '.') or 0)
             except ValueError:
                 discount_val = 0.0
-            try:
-                markup_val = float(var_markup.get().replace(",", ".") or 0)
-            except ValueError:
-                markup_val = 0.0
-
             subtotal, discount_amt, net_total, vat_amt, gross_total = self.calculate_quote_totals(
                 temp_items,
                 discount_val,
-                markup_val,
             )
             cost_subtotal = sum(
                 (
@@ -3980,6 +5202,19 @@ class CncQuotesApp:
                     )
                     return
                 item[column] = material_cost
+            elif column == "markup":
+                try:
+                    markup = float(value.strip().replace(",", "."))
+                    if not math.isfinite(markup) or markup < 0:
+                        raise ValueError
+                except ValueError:
+                    messagebox.showerror(
+                        "Invalid markup",
+                        "Markup must be a non-negative number.",
+                        parent=window,
+                    )
+                    return
+                item[column] = markup
             elif column in (
                 "name",
                 "drawing_number",
@@ -4003,11 +5238,10 @@ class CncQuotesApp:
             "material",
             "material_cost",
             "supplier",
+            "markup",
         }
 
         var_discount.trace_add("write", refresh_items_and_totals)
-        var_markup.trace_add("write", refresh_items_and_totals)
-
         def add_item_cmd():
             if self.show_changes_blocked(window):
                 return
@@ -4213,7 +5447,7 @@ class CncQuotesApp:
                     actual_hours_entry,
                 )
             )
-        quote_inputs.extend((ent_markup, ent_discount))
+        quote_inputs.append(ent_discount)
         self.bind_enter_to_next(*quote_inputs)
         refresh_items_and_totals()
 
@@ -4233,18 +5467,6 @@ class CncQuotesApp:
             except ValueError:
                 messagebox.showwarning("Error", "Discount must be a valid number!", parent=window)
                 return False
-            try:
-                markup_val = float(var_markup.get().replace(",", ".") or 0)
-                if not math.isfinite(markup_val) or markup_val < 0:
-                    raise ValueError
-            except ValueError:
-                messagebox.showwarning(
-                    "Error",
-                    "Markup must be a non-negative number.",
-                    parent=window,
-                )
-                return False
-
             required_date_text = required_date_var.get().strip()
             required_date_iso = ""
             if required_date_text:
@@ -4294,7 +5516,6 @@ class CncQuotesApp:
             new_data = {
                 "number": new_number,
                 "name": q_name,
-                "markup": markup_val,
                 "discount": discount_val,
                 "required_date": required_date_iso,
                 "required_date_option": (
@@ -4808,11 +6029,9 @@ class CncQuotesApp:
             if not items and "operations" in quote:
                 items = [{"operations": quote["operations"]}]
             discount_pct = float(quote.get("discount", 0.0))
-            markup_pct = float(quote.get("markup", 0.0) or 0.0)
             subtotal, discount, net, vat, gross = self.calculate_quote_totals(
                 items,
                 discount_pct,
-                markup_pct,
             )
             status = (
                 "Pending"

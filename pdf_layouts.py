@@ -1,5 +1,6 @@
 from copy import deepcopy
 from datetime import datetime
+import math
 
 
 PAGE_WIDTH = 210
@@ -13,6 +14,7 @@ FIELD_CATALOG = {
         ("required_date", "Required date"),
         ("customer_po", "Customer PO number"),
         ("items_table", "Quoted items and prices"),
+        ("custom_table", "Custom table"),
         ("totals_block", "Quote totals"),
         ("company_registration", "Company and VAT registration numbers"),
         ("company_logo", "Company logo"),
@@ -24,6 +26,7 @@ FIELD_CATALOG = {
         ("customer_block", "Customer details"),
         ("delivery_meta", "Delivery and order details"),
         ("items_table", "Delivery items"),
+        ("custom_table", "Custom table"),
         ("signature_block", "Signature fields"),
         ("company_registration", "Company and VAT registration numbers"),
         ("company_logo", "Company logo"),
@@ -36,6 +39,7 @@ FIELD_CATALOG = {
         ("job_item", "Item, drawing and material details"),
         ("job_operations", "Job operations"),
         ("job_material", "Raw material details"),
+        ("custom_table", "Custom table"),
         ("company_logo", "Company logo"),
         ("custom_text", "Custom text"),
     ),
@@ -99,6 +103,20 @@ TABLE_COLUMN_WIDTH_WEIGHTS = {
     "unit_price": 1.0,
     "line_total": 1.1,
 }
+
+
+def get_table_column_widths(document_type, element, columns):
+    saved_widths = element.get("column_widths", {})
+    if not isinstance(saved_widths, dict):
+        saved_widths = {}
+    widths = {}
+    for column in columns:
+        try:
+            width = float(saved_widths.get(column, TABLE_COLUMN_WIDTH_WEIGHTS[column]))
+        except (KeyError, TypeError, ValueError):
+            width = TABLE_COLUMN_WIDTH_WEIGHTS[column]
+        widths[column] = width if width > 0 and math.isfinite(width) else TABLE_COLUMN_WIDTH_WEIGHTS[column]
+    return widths
 
 
 DEFAULT_LAYOUTS = {
@@ -233,7 +251,7 @@ def _item_table_rows(document_type, data):
                 "operations": data["operations"],
             }
         ]
-    markup = float(data.get("markup", 0.0) or 0.0)
+    legacy_markup = float(data.get("markup", 0.0) or 0.0)
     rows = []
     for line_number, item in enumerate(items, start=1):
         quantity = int(item.get("quantity", 1) or 1)
@@ -242,6 +260,7 @@ def _item_table_rows(document_type, data):
             float(operation.get("cost", 0) or 0)
             for operation in item.get("operations", [])
         )
+        markup = float(item.get("markup", legacy_markup) or 0.0)
         unit_price = unit_cost * (1 + markup / 100)
         required_date = str(item.get("req_date", "")).strip()
         if required_date:
@@ -287,9 +306,11 @@ def _render_items_table(pdf, document_type, data, element, label):
     y = max(0, min(PAGE_HEIGHT - 2, float(element.get("y", 0))))
     font_size = max(5, min(36, int(element.get("font_size", 10))))
     row_height = max(6, font_size * 0.8)
-    total_weight = sum(TABLE_COLUMN_WIDTH_WEIGHTS[column] for column in columns)
+    table_border = 1 if element.get("show_table_lines", True) else 0
+    column_weights = get_table_column_widths(document_type, element, columns)
+    total_weight = sum(column_weights.values())
     column_widths = [
-        width * TABLE_COLUMN_WIDTH_WEIGHTS[column] / total_weight
+        width * column_weights[column] / total_weight
         for column in columns
     ]
     rows = _item_table_rows(document_type, data)
@@ -309,7 +330,7 @@ def _render_items_table(pdf, document_type, data, element, label):
                 cell_width,
                 row_height,
                 _table_cell_text(available_columns[column], pdf, cell_width),
-                border=1,
+                border=table_border,
                 align="C",
                 fill=True,
             )
@@ -339,7 +360,7 @@ def _render_items_table(pdf, document_type, data, element, label):
                 "unit_price",
                 "line_total",
             } else "L"
-            pdf.cell(cell_width, row_height, value, border=1, align=align)
+            pdf.cell(cell_width, row_height, value, border=table_border, align=align)
         y += row_height
 
 
@@ -371,7 +392,7 @@ def _field_values(document_type, data, settings):
         values["company_registration"] = ""
     if document_type == "quote":
         total = 0.0
-        markup = float(data.get("markup", 0.0) or 0.0)
+        legacy_markup = float(data.get("markup", 0.0) or 0.0)
         quote_items = [dict(item) for item in data.get("items", [])]
         if not quote_items and "operations" in data:
             quote_items = [{"operations": data["operations"]}]
@@ -381,6 +402,7 @@ def _field_values(document_type, data, settings):
                 float(operation.get("cost", 0) or 0)
                 for operation in item.get("operations", [])
             )
+            markup = float(item.get("markup", legacy_markup) or 0.0)
             total += unit_cost * quantity * (1 + markup / 100)
         discount = float(data.get("discount", 0.0) or 0.0)
         net_total = total * (1 - discount / 100)
@@ -489,6 +511,9 @@ def render_layout_pdf(pdf, document_type, data, settings):
                 element.get("label", ""),
             )
             continue
+        if field == "custom_table":
+            _render_custom_table(pdf, element)
+            continue
 
         text = values.get(field, "")
         if field == "custom_text":
@@ -539,6 +564,63 @@ def render_layout_pdf(pdf, document_type, data, settings):
             pdf.multi_cell(width, max(3, font_size * 0.42), str(text))
     pdf.page = final_page
     pdf.set_text_color(0, 0, 0)
+
+
+def _render_custom_table(pdf, element):
+    cells = element.get("custom_cells")
+    if not isinstance(cells, list) or not cells:
+        headers = [
+            str(header).strip()
+            for header in element.get("custom_headers", [])
+            if str(header).strip()
+        ]
+        rows = element.get("custom_rows", [])
+        cells = [headers, *rows] if headers else []
+    cells = [
+        [str(value) for value in row]
+        for row in cells
+        if isinstance(row, list)
+    ]
+    if not cells or not cells[0]:
+        return
+    column_count = max(len(row) for row in cells)
+    for row in cells:
+        row.extend([""] * (column_count - len(row)))
+
+    x = max(0, min(PAGE_WIDTH - 1, float(element.get("x", 0))))
+    width = max(1, min(PAGE_WIDTH - x, float(element.get("w", 60))))
+    y = max(0, min(PAGE_HEIGHT - 2, float(element.get("y", 0))))
+    height = max(5, float(element.get("h", 20)))
+    font_size = max(5, min(36, int(element.get("font_size", 10))))
+    saved_widths = element.get("column_widths", {})
+    if not isinstance(saved_widths, dict):
+        saved_widths = {}
+    widths = {}
+    for index in range(column_count):
+        try:
+            value = float(saved_widths.get(f"custom_{index}", 1))
+        except (TypeError, ValueError):
+            value = 1
+        widths[f"custom_{index}"] = value if value > 0 and math.isfinite(value) else 1
+    total_weight = sum(widths.values())
+    column_widths = [width * value / total_weight for value in widths.values()]
+    border = 1 if element.get("show_table_lines", True) else 0
+    saved_row_heights = element.get("row_heights", [])
+    if not isinstance(saved_row_heights, list):
+        saved_row_heights = []
+    pdf.set_font(str(element.get("font", "Arial")), str(element.get("style", "")), font_size)
+    pdf.set_xy(x, y)
+    for row_index, row in enumerate(cells):
+        try:
+            row_height = float(saved_row_heights[row_index])
+        except (IndexError, TypeError, ValueError):
+            row_height = max(6, font_size * 0.8)
+        row_height = max(3, row_height)
+        if pdf.get_y() + row_height > y + height:
+            break
+        for value, column_width in zip(row, column_widths):
+            pdf.cell(column_width, row_height, value, border=border)
+        pdf.ln(row_height)
 
 
 def generate_layout_document(document_type, data, settings):

@@ -2,7 +2,6 @@
     {
         "number": 2000,
         "name": "12 Tool",
-        "markup": 70.0,
         "discount": 0.0,
         "required_date": "2026-11-13",
         "required_date_option": "Specific date",
@@ -44,7 +43,8 @@
                         "rate": 20.0,
                         "cost": 20.0
                     }
-                ]
+                ],
+                "markup": 70.0
             },
             {
                 "name": "Bottom Sub",
@@ -76,7 +76,8 @@
                         "rate": 20.0,
                         "cost": 20.0
                     }
-                ]
+                ],
+                "markup": 70.0
             }
         ],
         "status": "order",
@@ -85,7 +86,6 @@
     {
         "number": 2001,
         "name": "12 Tool",
-        "markup": 70.0,
         "discount": 0.0,
         "required_date": "2026-11-13",
         "required_date_option": "Specific date",
@@ -127,7 +127,8 @@
                         "rate": 20.0,
                         "cost": 20.0
                     }
-                ]
+                ],
+                "markup": 70.0
             },
             {
                 "name": "Bottom Sub",
@@ -159,7 +160,8 @@
                         "rate": 20.0,
                         "cost": 20.0
                     }
-                ]
+                ],
+                "markup": 70.0
             }
         ],
         "status": "order",
@@ -168,7 +170,6 @@
     {
         "number": 3001,
         "name": "Well1",
-        "markup": 70.0,
         "discount": 0.0,
         "required_date": "2026-10-31",
         "required_date_option": "Specific date",
@@ -204,7 +205,8 @@
                         "rate": 20.0,
                         "cost": 20.0
                     }
-                ]
+                ],
+                "markup": 70.0
             },
             {
                 "name": "Mandrel",
@@ -236,7 +238,8 @@
                         "rate": 20.0,
                         "cost": 20.0
                     }
-                ]
+                ],
+                "markup": 70.0
             },
             {
                 "name": "Body Lock Ring",
@@ -262,7 +265,8 @@
                         "rate": 20.0,
                         "cost": 20.0
                     }
-                ]
+                ],
+                "markup": 70.0
             },
             {
                 "name": "Slip Housing",
@@ -294,7 +298,8 @@
                         "rate": 20.0,
                         "cost": 20.0
                     }
-                ]
+                ],
+                "markup": 70.0
             },
             {
                 "name": "Rachet Key",
@@ -326,7 +331,8 @@
                         "rate": 20.0,
                         "cost": 20.0
                     }
-                ]
+                ],
+                "markup": 70.0
             }
         ],
         "status": "quote"
@@ -334,7 +340,6 @@
     {
         "number": 2002,
         "name": "Piotr123",
-        "markup": 70.0,
         "discount": 5.0,
         "required_date": "2026-11-06",
         "required_date_option": "4 weeks",
@@ -376,7 +381,8 @@
                         "rate": 20.0,
                         "cost": 20.0
                     }
-                ]
+                ],
+                "markup": 70.0
             },
             {
                 "name": "Hlapper Hoising",
@@ -408,7 +414,8 @@
                         "rate": 20.0,
                         "cost": 20.0
                     }
-                ]
+                ],
+                "markup": 70.0
             },
             {
                 "name": "Flapper",
@@ -440,7 +447,8 @@
                         "rate": 20.0,
                         "cost": 20.0
                     }
-                ]
+                ],
+                "markup": 70.0
             }
         ],
         "status": "order",

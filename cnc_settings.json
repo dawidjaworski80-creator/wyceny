@@ -15,8 +15,8 @@
     "VAT_Reg_No": "299 0513 74",
     "Company_Phone_Landline": "01224 791430",
     "Company_Phone_Mobile": "",
-    "Logo_Path": "C:/Users/dawid_xg4573m/Downloads/Gemini_Generated_Image_l749h1l749h1l749.jpeg",
-    "Pdf_Output_Directory": "C:/Users/dawid_xg4573m/Documents/PDF",
+    "Logo_Path": "C:/Users/Dawid.Jaworski/Desktop/247 Machining Services - Logo Files/Logo Files/JPG/WhiteBackground -Black Text - Full Colour.jpg",
+    "Pdf_Output_Directory": "C:/Users/Dawid.Jaworski/Desktop/PDF",
     "saw cutting": 20.0,
     "Inspection": 70.0,
     "PDF_Layouts": {
@@ -81,8 +81,8 @@
                 "id": "items",
                 "field": "items_table",
                 "label": "Items",
-                "x": 20.850993377483455,
-                "y": 87.69039735099336,
+                "x": 20.850993377483462,
+                "y": 87.82168231209413,
                 "w": 160.0,
                 "h": 110.0,
                 "font_size": 10,
@@ -96,21 +96,29 @@
                     "drawing_number",
                     "revision",
                     "quantity",
-                    "unit_price",
-                    "line_total"
-                ]
+                    "unit_price"
+                ],
+                "show_table_lines": false,
+                "column_widths": {
+                    "item_no": 0.45,
+                    "name": 2.1,
+                    "drawing_number": 1.4,
+                    "revision": 0.6,
+                    "quantity": 0.65,
+                    "unit_price": 1.0
+                }
             },
             {
                 "id": "totals",
                 "field": "totals_block",
-                "label": "Totals:",
+                "label": "",
                 "x": 124.0,
                 "y": 223.44205298013247,
                 "w": 45.0,
                 "h": 35.0,
                 "font_size": 12,
                 "font": "Times",
-                "style": "",
+                "style": "B",
                 "color": "#111827",
                 "visible": true
             },
