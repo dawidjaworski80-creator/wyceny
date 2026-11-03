@@ -48,9 +48,25 @@ class DataStore:
             "VAT_Reg_No": "",
             "Company_Phone_Landline": "",
             "Company_Phone_Mobile": "",
+            "Excel_Templates": {
+                "quote": os.path.join(self.base_dir, "templates", "quote.xlsx"),
+                "delivery_note": os.path.join(
+                    self.base_dir, "templates", "delivery_note.xlsx"
+                ),
+                "job_card": os.path.join(self.base_dir, "templates", "job_card.xlsx"),
+            },
         }
         saved = self._load_json(self.settings_file, {})
+        default_templates = default_rates["Excel_Templates"]
         default_rates.update(saved)
+        saved_templates = saved.get("Excel_Templates", {})
+        if isinstance(saved_templates, dict):
+            default_rates["Excel_Templates"] = {
+                **default_templates,
+                **saved_templates,
+            }
+        else:
+            default_rates["Excel_Templates"] = default_templates
         return default_rates
 
     def save_settings(self, settings: Dict[str, Any]):

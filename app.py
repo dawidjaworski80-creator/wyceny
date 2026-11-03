@@ -1,12 +1,13 @@
 import calendar
 from copy import deepcopy
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog, colorchooser, simpledialog
+from tkinter import font as tkfont, ttk, messagebox, filedialog, colorchooser, simpledialog
 from datetime import date, datetime, timedelta
 import math
 import os
 import re
 import tempfile
+import time
 
 from data_store import DataStore
 from email_service import EmailService
@@ -46,7 +47,7 @@ class GridTreeview(ttk.Treeview):
         kwargs["columns"] = data_columns + self.separator_columns
         super().__init__(*args, **kwargs)
         self.tag_configure("grid_even", background="#FFFFFF")
-        self.tag_configure("grid_odd", background="#EEF2F7")
+        self.tag_configure("grid_odd", background="#F3F6FA")
         displayed_columns = []
         for index, column in enumerate(data_columns):
             displayed_columns.append(column)
@@ -173,7 +174,7 @@ class CncQuotesApp:
         self.root = root
         self.root.title(" - Quoting System")
         self.root.geometry("1100x550")
-        self.root.state("zoomed")
+        self.root.after_idle(self.root.state, "zoomed")
         style = ttk.Style(self.root)
         if "clam" in style.theme_names():
             style.theme_use("clam")
@@ -187,10 +188,22 @@ class CncQuotesApp:
         )
         style.configure(
             "Treeview.Heading",
-            background="#E2E8F0",
+            background="#475569",
+            foreground="#FFFFFF",
             bordercolor="#64748B",
             borderwidth=1,
             relief="solid",
+            font=("Segoe UI", 9, "bold"),
+            padding=(6, 5),
+        )
+        style.map(
+            "Treeview.Heading",
+            background=[("active", "#64748B")],
+        )
+        style.map(
+            "Treeview",
+            background=[("selected", "#2563EB")],
+            foreground=[("selected", "#FFFFFF")],
         )
 
         self.store = DataStore()
@@ -342,7 +355,8 @@ class CncQuotesApp:
 
     def maximize_window(self, window):
         window.update_idletasks()
-        window.state("zoomed")
+        window.resizable(True, True)
+        window.after_idle(window.state, "zoomed")
 
     def _normalize_customers(self):
         changed = False
@@ -451,6 +465,8 @@ class CncQuotesApp:
         self.logo_label = tk.Label(navigation, bg="#1F2937", fg="white")
         self.logo_label.pack(side=tk.LEFT, padx=(12, 8), pady=4)
         self.refresh_app_logo()
+        self.refresh_watermarks()
+        self.root.bind_all("<Map>", self.on_window_mapped, add="+")
 
         self.nav_buttons = {}
         nav_items = (
@@ -571,7 +587,14 @@ class CncQuotesApp:
             "order_status",
             "job_card",
         )
-        self.tree = GridTreeview(self.root, columns=columns, show="tree headings")
+        tree_frame = tk.Frame(self.root)
+        tree_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.tree = GridTreeview(tree_frame, columns=columns, show="tree headings")
+        tree_y_scroll = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.tree.yview)
+        self.tree.configure(yscrollcommand=tree_y_scroll.set)
+        tree_y_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self._autosize_after_id = None
+        self.tree.bind("<Configure>", lambda event: self.schedule_autosize_columns(), add="+")
         self.tree.heading("#0", text="Line")
         self.tree.column("#0", width=55, anchor=tk.CENTER, stretch=False)
         self.tree.heading("number", text="No.")
@@ -592,7 +615,7 @@ class CncQuotesApp:
         self.tree.column("order_status", width=110, anchor=tk.CENTER)
         self.tree.column("job_card", width=170, anchor=tk.CENTER, stretch=False)
 
-        self.tree.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.tree.bind("<Button-1>", self.handle_job_card_click, add="+")
         self.tree.bind("<Motion>", self.update_tree_cursor)
         self.tree.bind("<Leave>", lambda event: self.tree.configure(cursor=""))
@@ -696,6 +719,50 @@ class CncQuotesApp:
             return
 
         self.logo_label.config(image=self.logo_image, text="")
+
+    def _watermark_image(self, window):
+        logo_path = self.settings.get("Logo_Path", "").strip()
+        if not logo_path or not os.path.isfile(logo_path):
+            return None
+        try:
+            from PIL import Image, ImageTk
+
+            r, g, b = (value // 256 for value in window.winfo_rgb(window.cget("bg")))
+            image = Image.open(logo_path).convert("RGBA")
+            image.thumbnail((420, 420), Image.LANCZOS)
+            alpha = image.getchannel("A").point(lambda value: int(value * 0.12))
+            image.putalpha(alpha)
+            background = Image.new("RGBA", image.size, (r, g, b, 255))
+            background.alpha_composite(image)
+            return ImageTk.PhotoImage(background.convert("RGB"))
+        except (ImportError, OSError, ValueError, tk.TclError):
+            return None
+
+    def apply_watermark(self, window):
+        old = getattr(window, "_watermark_label", None)
+        if old is not None:
+            old.destroy()
+            window._watermark_label = None
+        photo = self._watermark_image(window)
+        if photo is None:
+            return
+        label = tk.Label(window, image=photo, bd=0, bg=window.cget("bg"))
+        label.image = photo
+        label.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+        label.lower()
+        window._watermark_label = label
+
+    def refresh_watermarks(self):
+        self.apply_watermark(self.root)
+        for child in self.root.winfo_children():
+            if isinstance(child, tk.Toplevel):
+                self.apply_watermark(child)
+
+    def on_window_mapped(self, event):
+        widget = event.widget
+        if isinstance(widget, tk.Toplevel) and not hasattr(widget, "_watermark_label"):
+            widget._watermark_label = None
+            widget.after_idle(lambda: widget.winfo_exists() and self.apply_watermark(widget))
 
     def refresh_list(self):
         for row in self.tree.get_children():
@@ -810,6 +877,8 @@ class CncQuotesApp:
                     job_card_label if q.get("status") == "order" else "",
                 ),
             )
+
+        self.schedule_autosize_columns()
 
         is_orders = self.current_view in ("orders", "home")
         self.edit_button.config(text="Edit Order" if is_orders else "Edit Quote")
@@ -953,6 +1022,55 @@ class CncQuotesApp:
         if order is not None:
             self.generate_job_card(order=order)
         return "break"
+
+    def schedule_autosize_columns(self):
+        if self._autosize_after_id is not None:
+            self.root.after_cancel(self._autosize_after_id)
+        self._autosize_after_id = self.root.after(30, self.autosize_columns)
+
+    def autosize_columns(self):
+        self._autosize_after_id = None
+        tree = self.tree
+        font = tkfont.nametofont("TkDefaultFont")
+        heading_font = tkfont.nametofont("TkHeadingFont")
+        padding = 24
+        separator_width = 8
+        columns = [
+            column for column in tree["displaycolumns"]
+            if not str(column).startswith("__grid_separator_")
+        ]
+        if not columns:
+            return
+        widths = {}
+        for column in columns:
+            width = heading_font.measure(str(tree.heading(column, "text"))) + padding
+            for iid in tree.get_children(""):
+                text = str(tree.set(iid, column))
+                width = max(width, font.measure(text) + padding)
+            widths[column] = width
+
+        available = tree.winfo_width() - 55 - separator_width * (len(columns) - 1) - 4
+        total = sum(widths.values())
+        if available > 100 and total > available:
+            # Shrink only the columns wider than their fair share.
+            excess = total - available
+            while excess > 0.5:
+                flexible = [c for c in columns if widths[c] > 90]
+                if not flexible:
+                    break
+                widest = max(widths[c] for c in flexible)
+                cut = min(excess, max(1, (widest - 90) / 2))
+                per_column = cut / len(flexible)
+                for column in flexible:
+                    widths[column] = max(90, widths[column] - per_column)
+                excess = sum(widths.values()) - available
+        elif available > total and columns:
+            extra = (available - total) / len(columns)
+            for column in columns:
+                widths[column] += extra
+
+        for column in columns:
+            tree.column(column, width=int(widths[column]), stretch=False)
 
     def update_tree_cursor(self, event):
         action_column = len(self.tree["displaycolumns"])
@@ -1934,10 +2052,7 @@ class CncQuotesApp:
                 ("Rates", lambda: self.open_rates_settings_window(win)),
                 ("Stats", open_stats_from_settings),
                 ("Company Details", lambda: self.open_company_details_window(win)),
-                (
-                    "PDF Layout Generator",
-                    lambda: self.open_simple_pdf_layout_editor(win),
-                ),
+                ("Excel Templates", lambda: self.open_excel_templates_window(win)),
             )
         ):
             button = tk.Button(
@@ -2004,6 +2119,118 @@ class CncQuotesApp:
         win.geometry(
             f"{window_width}x{window_height}+{window_x}+{window_y}"
         )
+
+    def open_excel_templates_window(self, parent):
+        win = tk.Toplevel(parent)
+        win.title("Excel Templates")
+        win.geometry("760x300")
+        win.transient(parent)
+        win.grab_set()
+
+        document_types = (
+            ("Quote", "quote"),
+            ("Delivery Note", "delivery_note"),
+            ("Job Card", "job_card"),
+        )
+        current_templates = self.settings.get("Excel_Templates", {})
+        if not isinstance(current_templates, dict):
+            current_templates = {}
+        template_paths = {
+            document_type: tk.StringVar(
+                value=str(current_templates.get(document_type, ""))
+            )
+            for _, document_type in document_types
+        }
+
+        tk.Label(
+            win,
+            text=(
+                "Choose an .xlsx workbook for each document. Design its print layout in Excel "
+                "and use {{field_name}} placeholders for application data."
+            ),
+            justify=tk.LEFT,
+            wraplength=700,
+        ).grid(row=0, column=0, columnspan=3, padx=14, pady=(14, 8), sticky="w")
+
+        for row, (label, document_type) in enumerate(document_types, start=1):
+            tk.Label(win, text=f"{label} template:", anchor=tk.E).grid(
+                row=row, column=0, padx=(14, 6), pady=7, sticky="e"
+            )
+            entry = tk.Entry(win, textvariable=template_paths[document_type], width=66)
+            entry.grid(row=row, column=1, padx=4, pady=7, sticky="ew")
+
+            def browse_template(selected_type=document_type, selected_label=label):
+                selected_path = filedialog.askopenfilename(
+                    parent=win,
+                    title=f"Select {selected_label.lower()} Excel template",
+                    filetypes=[("Excel workbooks", "*.xlsx")],
+                )
+                if selected_path:
+                    template_paths[selected_type].set(selected_path)
+
+            tk.Button(
+                win,
+                text="Browse...",
+                command=browse_template,
+            ).grid(row=row, column=2, padx=(4, 14), pady=7)
+
+        tk.Label(
+            win,
+            text=(
+                "Required table row markers: {{items_table}} for quotes and delivery notes; "
+                "{{operations_table}} for job cards. Full placeholder list: README.md."
+            ),
+            justify=tk.LEFT,
+            wraplength=700,
+            fg="#475569",
+        ).grid(row=4, column=0, columnspan=3, padx=14, pady=(4, 8), sticky="w")
+        win.columnconfigure(1, weight=1)
+
+        def save_templates():
+            if self.show_changes_blocked(win):
+                return
+            selected_templates = {
+                document_type: template_paths[document_type].get().strip()
+                for _, document_type in document_types
+            }
+            for document_type, path in selected_templates.items():
+                if path and (
+                    not os.path.isfile(path)
+                    or os.path.splitext(path)[1].lower() != ".xlsx"
+                ):
+                    messagebox.showerror(
+                        "Invalid Excel template",
+                        f"Choose an existing .xlsx file for {document_type.replace('_', ' ')}.",
+                        parent=win,
+                    )
+                    return
+
+            previous = self.settings.get("Excel_Templates")
+            self.settings["Excel_Templates"] = selected_templates
+            try:
+                self.save_settings()
+            except OSError as exc:
+                if previous is None:
+                    self.settings.pop("Excel_Templates", None)
+                else:
+                    self.settings["Excel_Templates"] = previous
+                messagebox.showerror(
+                    "Save failed",
+                    f"Could not save Excel templates:\n{exc}",
+                    parent=win,
+                )
+                return
+            messagebox.showinfo("Saved", "Excel templates saved.", parent=win)
+            win.destroy()
+
+        tk.Button(
+            win,
+            text="Save",
+            command=save_templates,
+            bg="#2563EB",
+            fg="white",
+            padx=18,
+        ).grid(row=5, column=0, columnspan=3, pady=(5, 12))
 
     def open_simple_pdf_layout_editor(self, parent):
         layouts = get_layouts(self.settings)
@@ -2570,20 +2797,34 @@ class CncQuotesApp:
             )
 
         def start_drag(event):
-            closest = canvas.find_closest(event.x, event.y)
-            tags = canvas.gettags(closest[0]) if closest else ()
+            x, y = canvas_position(event)
+            if not (0 <= x <= PAGE_WIDTH and 0 <= y <= PAGE_HEIGHT):
+                return
             index = next(
                 (
-                    int(tag.split(":", 1)[1])
-                    for tag in tags
-                    if tag.startswith("element:")
+                    candidate
+                    for candidate in reversed(range(len(elements())))
+                    if (
+                        float(elements()[candidate].get("x", 0))
+                        <= x
+                        <= float(elements()[candidate].get("x", 0))
+                        + float(elements()[candidate].get("w", 1))
+                        and float(elements()[candidate].get("y", 0))
+                        <= y
+                        <= float(elements()[candidate].get("y", 0))
+                        + float(elements()[candidate].get("h", 1))
+                    )
                 ),
                 None,
             )
-            if index is None or index >= len(elements()):
+            if index is None:
+                drag_state["index"] = None
+                selected_index["value"] = None
+                element_list.selection_clear(0, tk.END)
+                load_selected()
+                draw_preview()
                 return
             selected_index["value"] = index
-            x, y = canvas_position(event)
             element = elements()[index]
             drag_state.update(
                 index=index,
@@ -3920,6 +4161,7 @@ class CncQuotesApp:
                 messagebox.showerror("Save failed", f"Could not save links:\n{exc}", parent=win)
                 return
             self.refresh_app_logo()
+            self.refresh_watermarks()
             messagebox.showinfo("Success", "Links saved successfully.", parent=win)
             win.destroy()
 
@@ -3949,6 +4191,7 @@ class CncQuotesApp:
             "Company_Phone_Landline",
             "Company_Phone_Mobile",
             "PDF_Layouts",
+            "Excel_Templates",
         }
         operation_rates = {
             key: value
@@ -4317,6 +4560,7 @@ class CncQuotesApp:
             "Company_Phone_Landline",
             "Company_Phone_Mobile",
             "PDF_Layouts",
+            "Excel_Templates",
         }
         op_types = [key for key in self.settings if key not in non_operation_settings]
         cb_type = ttk.Combobox(add_op_frame, values=op_types, state="readonly", width=15)
@@ -5019,9 +5263,6 @@ class CncQuotesApp:
             "revision",
             "quantity",
             "req_date",
-            "material",
-            "material_cost",
-            "supplier",
             "markup",
             "unit_price",
             "cost",
@@ -5041,9 +5282,6 @@ class CncQuotesApp:
         items_tree.heading("revision", text="Revision")
         items_tree.heading("quantity", text="Qty")
         items_tree.heading("req_date", text="Required Date")
-        items_tree.heading("material", text="Required Material")
-        items_tree.heading("material_cost", text="Material / Unit")
-        items_tree.heading("supplier", text="Supplier")
         items_tree.heading("markup", text="Markup (%)")
         items_tree.heading("unit_price", text="Unit Price ex VAT")
         items_tree.heading("cost", text="Line Total ex VAT")
@@ -5053,9 +5291,6 @@ class CncQuotesApp:
         items_tree.column("revision", width=80, anchor=tk.CENTER)
         items_tree.column("quantity", width=55, anchor=tk.CENTER)
         items_tree.column("req_date", width=120, anchor=tk.CENTER)
-        items_tree.column("material", width=170)
-        items_tree.column("material_cost", width=110, anchor=tk.E)
-        items_tree.column("supplier", width=150)
         items_tree.column("markup", width=95, anchor=tk.E)
         items_tree.column("unit_price", width=110, anchor=tk.E)
         items_tree.column("cost", width=130, anchor=tk.E)
@@ -5134,9 +5369,6 @@ class CncQuotesApp:
                         item.get("revision", ""),
                         quantity,
                         item.get("req_date", ""),
-                        item.get("material", ""),
-                        f"{float(item.get('material_cost', 0) or 0):.2f}",
-                        item.get("supplier", ""),
                         f"{markup_val:.2f}",
                         f"{unit_price:.2f}",
                         f"{line_total:.2f}",
@@ -5235,11 +5467,60 @@ class CncQuotesApp:
             "revision",
             "quantity",
             "req_date",
-            "material",
-            "material_cost",
-            "supplier",
             "markup",
         }
+
+        item_drag = {"source": None}
+
+        def start_item_drag(event):
+            if is_order:
+                return
+            row_id = items_tree.identify_row(event.y)
+            if not row_id:
+                item_drag["source"] = None
+                return
+            item_drag["source"] = int(row_id)
+            items_tree.focus(row_id)
+            items_tree.selection_set(row_id)
+
+        def move_item_drag(event):
+            source = item_drag["source"]
+            if is_order or source is None or source >= len(temp_items):
+                return
+            row_id = items_tree.identify_row(event.y)
+            if not row_id:
+                children = items_tree.get_children()
+                if not children:
+                    return
+                last_row = children[-1]
+                last_box = items_tree.bbox(last_row)
+                if not last_box or event.y <= last_box[1] + last_box[3]:
+                    return
+                target = len(temp_items)
+            else:
+                target = int(row_id)
+                row_box = items_tree.bbox(row_id)
+                if row_box and event.y > row_box[1] + row_box[3] / 2:
+                    target += 1
+            if target > source:
+                target -= 1
+            target = max(0, min(len(temp_items) - 1, target))
+            if target == source:
+                return
+            item = temp_items.pop(source)
+            temp_items.insert(target, item)
+            item_drag["source"] = target
+            refresh_items_and_totals()
+            row_id = str(target)
+            items_tree.focus(row_id)
+            items_tree.selection_set(row_id)
+
+        def finish_item_drag(event):
+            item_drag["source"] = None
+
+        items_tree.bind("<ButtonPress-1>", start_item_drag, add="+")
+        items_tree.bind("<B1-Motion>", move_item_drag, add="+")
+        items_tree.bind("<ButtonRelease-1>", finish_item_drag, add="+")
 
         var_discount.trace_add("write", refresh_items_and_totals)
         def add_item_cmd():
@@ -6216,7 +6497,82 @@ class CncQuotesApp:
             messagebox.showerror("Error", str(exc), parent=parent)
 
 
+APP_AUTHOR = "Dawid Jaworski"
+
+
+def _subscription_text(settings):
+    end_text = str(settings.get("Software_End_Date", "")).strip()
+    if not end_text:
+        return "Subscription: no expiry date set", "#334155"
+    try:
+        end_datetime = _parse_software_end_datetime(end_text)
+    except ValueError:
+        return "Subscription: invalid end date", "#B91C1C"
+    remaining = end_datetime - datetime.now()
+    end_label = end_datetime.strftime("%d.%m.%Y %H:%M")
+    if remaining.total_seconds() <= 0:
+        return f"Subscription expired on {end_label} (read-only mode)", "#B91C1C"
+    days = remaining.days
+    hours = remaining.seconds // 3600
+    color = "#B45309" if days < 14 else "#166534"
+    return f"Subscription expires: {end_label}\nTime left: {days} days {hours} h", color
+
+
+def run_splash_screen(root, settings, duration_ms=2500):
+    splash = tk.Toplevel(root)
+    splash.overrideredirect(True)
+    splash.configure(bg="#FFFFFF", highlightthickness=2, highlightbackground="#475569")
+    width, height = 520, 360
+    x = (splash.winfo_screenwidth() - width) // 2
+    y = (splash.winfo_screenheight() - height) // 2
+    splash.geometry(f"{width}x{height}+{x}+{y}")
+    splash.attributes("-topmost", True)
+
+    logo_path = str(settings.get("Logo_Path", "")).strip()
+    if logo_path and os.path.isfile(logo_path):
+        try:
+            from PIL import Image, ImageTk
+
+            image = Image.open(logo_path)
+            image.thumbnail((300, 110), Image.LANCZOS)
+            splash.logo_image = ImageTk.PhotoImage(image)
+            tk.Label(splash, image=splash.logo_image, bg="#FFFFFF").pack(pady=(24, 8))
+        except (ImportError, OSError, ValueError, tk.TclError):
+            pass
+
+    tk.Label(
+        splash, text="Machine Shop Quoting System", font=("Segoe UI", 18, "bold"),
+        bg="#FFFFFF", fg="#1F2937",
+    ).pack(pady=(8, 4))
+    tk.Label(
+        splash, text=f"Author: {APP_AUTHOR}", font=("Segoe UI", 10),
+        bg="#FFFFFF", fg="#475569",
+    ).pack()
+    subscription, color = _subscription_text(settings)
+    tk.Label(
+        splash, text=subscription, font=("Segoe UI", 10, "bold"),
+        bg="#FFFFFF", fg=color, justify=tk.CENTER,
+    ).pack(pady=(10, 0))
+
+    status = tk.Label(splash, text="Loading...", font=("Segoe UI", 9), bg="#FFFFFF", fg="#64748B")
+    status.pack(side=tk.BOTTOM, pady=(0, 14))
+    bar = ttk.Progressbar(splash, mode="determinate", maximum=100, length=400)
+    bar.pack(side=tk.BOTTOM, pady=(0, 6))
+
+    steps = 50
+    for step in range(1, steps + 1):
+        bar["value"] = step * 100 / steps
+        splash.update()
+        time.sleep(duration_ms / steps / 1000)
+    status.config(text="Starting...")
+    splash.update()
+    splash.destroy()
+
+
 if __name__ == "__main__":
     root = tk.Tk()
+    root.withdraw()
+    run_splash_screen(root, DataStore().load_settings())
     app = CncQuotesApp(root)
+    root.deiconify()
     root.mainloop()

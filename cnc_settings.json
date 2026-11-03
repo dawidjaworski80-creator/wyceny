@@ -290,76 +290,6 @@
                 "visible": true
             },
             {
-                "id": "company",
-                "field": "company_block",
-                "label": "",
-                "x": 12,
-                "y": 27,
-                "w": 186,
-                "h": 22,
-                "font_size": 8,
-                "font": "Arial",
-                "style": "",
-                "color": "#1F2937",
-                "visible": true
-            },
-            {
-                "id": "job-customer",
-                "field": "job_customer",
-                "label": "Customer and Job Information",
-                "x": 12,
-                "y": 53,
-                "w": 186,
-                "h": 38,
-                "font_size": 9,
-                "font": "Arial",
-                "style": "",
-                "color": "#111827",
-                "visible": true
-            },
-            {
-                "id": "job-item",
-                "field": "job_item",
-                "label": "Item details",
-                "x": 12,
-                "y": 96,
-                "w": 186,
-                "h": 36,
-                "font_size": 9,
-                "font": "Arial",
-                "style": "",
-                "color": "#111827",
-                "visible": true
-            },
-            {
-                "id": "operations",
-                "field": "job_operations",
-                "label": "Operations",
-                "x": 12.491721854304643,
-                "y": 135.5248344370861,
-                "w": 186,
-                "h": 73,
-                "font_size": 9,
-                "font": "Arial",
-                "style": "",
-                "color": "#111827",
-                "visible": true
-            },
-            {
-                "id": "raw-material",
-                "field": "job_material",
-                "label": "Raw Material",
-                "x": 12,
-                "y": 215,
-                "w": 186,
-                "h": 38,
-                "font_size": 9,
-                "font": "Arial",
-                "style": "",
-                "color": "#111827",
-                "visible": true
-            },
-            {
                 "id": "logo",
                 "field": "company_logo",
                 "label": "",
@@ -372,6 +302,48 @@
                 "style": "",
                 "color": "#1F2937",
                 "visible": true
+            },
+            {
+                "id": "custom_table-3",
+                "field": "custom_table",
+                "label": "Custom table",
+                "x": 15,
+                "y": 31,
+                "w": 120,
+                "h": 18,
+                "font_size": 10,
+                "font": "Arial",
+                "style": "",
+                "color": "#111827",
+                "visible": true,
+                "custom_cells": [
+                    [
+                        "",
+                        "",
+                        ""
+                    ],
+                    [
+                        "",
+                        "",
+                        ""
+                    ],
+                    [
+                        "",
+                        "",
+                        ""
+                    ]
+                ],
+                "column_widths": {
+                    "custom_0": 33.33,
+                    "custom_1": 33.33,
+                    "custom_2": 33.33
+                },
+                "row_heights": [
+                    8.0,
+                    8.0,
+                    8.0
+                ],
+                "show_table_lines": true
             }
         ]
     }
