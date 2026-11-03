@@ -1,10 +1,17 @@
+import atexit
 import json
 import math
 import os
+import queue
 import re
 import subprocess
 import tempfile
+import threading
 from datetime import date, datetime
+
+_worker = None
+_script_directory = None
+_worker_lock = threading.Lock()
 
 
 DOCUMENT_LABELS = {
@@ -14,12 +21,10 @@ DOCUMENT_LABELS = {
 }
 
 POWERSHELL_SCRIPT = r"""
-param([string]$PayloadPath)
 $ErrorActionPreference = 'Stop'
+[Console]::InputEncoding = New-Object System.Text.UTF8Encoding($false)
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $excel = $null
-$workbook = $null
-$sheets = $null
-$allSheets = $null
 
 function ConvertTo-Map($Object) {
     $result = @{}
@@ -31,50 +36,75 @@ function ConvertTo-Map($Object) {
     return $result
 }
 
+function Get-RangeValues($Range) {
+    $value = $Range.Value2
+    if ($value -is [array]) { return ,$value }
+    $single = New-Object 'object[,]' 1, 1
+    $single[0, 0] = $value
+    return ,$single
+}
+
+function Set-CellTokens($Cell, $Value, $Tokens) {
+    $matches = [regex]::Matches($Value, '\{\{([a-zA-Z0-9_]+)\}\}')
+    if ($matches.Count -eq 1 -and $matches[0].Value -eq $Value) {
+        $key = $matches[0].Groups[1].Value
+        if ($Tokens.ContainsKey($key)) {
+            $replacement = $Tokens[$key]
+            if ($null -eq $replacement) {
+                $Cell.Value2 = ''
+            }
+            elseif ($replacement -is [string]) {
+                $Cell.NumberFormat = '@'
+                $Cell.Value2 = $replacement
+            }
+            else {
+                $Cell.Formula = [string]$replacement
+            }
+        }
+        return
+    }
+    $updated = $Value
+    foreach ($match in $matches) {
+        $key = $match.Groups[1].Value
+        if ($Tokens.ContainsKey($key)) {
+            $updated = $updated.Replace($match.Value, [string]$Tokens[$key])
+        }
+    }
+    if ($updated -ne $Value) { $Cell.Value2 = $updated }
+}
+
+function Replace-RangeTokens($Sheet, $Range, $Tokens) {
+    $values = Get-RangeValues $Range
+    $firstRow = [int]$Range.Row
+    $firstColumn = [int]$Range.Column
+    $rowStart = $values.GetLowerBound(0)
+    $columnStart = $values.GetLowerBound(1)
+    for ($r = $rowStart; $r -le $values.GetUpperBound(0); $r++) {
+        for ($c = $columnStart; $c -le $values.GetUpperBound(1); $c++) {
+            $value = $values[$r, $c]
+            if ($value -isnot [string] -or $value.IndexOf('{{') -lt 0) { continue }
+            $cell = $Sheet.Cells.Item($firstRow + $r - $rowStart, $firstColumn + $c - $columnStart)
+            Set-CellTokens $cell $value $Tokens
+        }
+    }
+}
+
 function Replace-RowTokens($Sheet, [int]$Row, $Tokens) {
     $used = $Sheet.UsedRange
     $lastColumn = $used.Column + $used.Columns.Count - 1
-    for ($column = 1; $column -le $lastColumn; $column++) {
-        $cell = $Sheet.Cells.Item($Row, $column)
-        $value = $cell.Value2
-        if ($value -isnot [string]) { continue }
-        $matches = [regex]::Matches($value, '\{\{([a-zA-Z0-9_]+)\}\}')
-        if ($matches.Count -eq 1 -and $matches[0].Value -eq $value) {
-            $key = $matches[0].Groups[1].Value
-            if ($Tokens.ContainsKey($key)) {
-                $replacement = $Tokens[$key]
-                if ($null -eq $replacement) {
-                    $cell.Value2 = ''
-                }
-                elseif ($replacement -is [string]) {
-                    $cell.NumberFormat = '@'
-                    $cell.Value2 = $replacement
-                }
-                else {
-                    $cell.Formula = [string]$replacement
-                }
-            }
-            continue
-        }
-        $updated = $value
-        foreach ($match in $matches) {
-            $key = $match.Groups[1].Value
-            if ($Tokens.ContainsKey($key)) {
-                $updated = $updated.Replace($match.Value, [string]$Tokens[$key])
-            }
-        }
-        if ($updated -ne $value) { $cell.Value2 = $updated }
-    }
+    $range = $Sheet.Range($Sheet.Cells.Item($Row, 1), $Sheet.Cells.Item($Row, $lastColumn))
+    Replace-RangeTokens $Sheet $range $Tokens
 }
 
 function Find-TableMarker($Sheet, [string]$Marker) {
     $used = $Sheet.UsedRange
-    $lastRow = $used.Row + $used.Rows.Count - 1
-    $lastColumn = $used.Column + $used.Columns.Count - 1
-    for ($row = $used.Row; $row -le $lastRow; $row++) {
-        for ($column = $used.Column; $column -le $lastColumn; $column++) {
-            if ([string]$Sheet.Cells.Item($row, $column).Value2 -ceq $Marker) {
-                return $row
+    $values = Get-RangeValues $used
+    $rowStart = $values.GetLowerBound(0)
+    $columnStart = $values.GetLowerBound(1)
+    for ($r = $rowStart; $r -le $values.GetUpperBound(0); $r++) {
+        for ($c = $columnStart; $c -le $values.GetUpperBound(1); $c++) {
+            if ([string]$values[$r, $c] -ceq $Marker) {
+                return ([int]$used.Row + $r - $rowStart)
             }
         }
     }
@@ -104,12 +134,7 @@ function Expand-Table($Sheet, [string]$Marker, $Records) {
 }
 
 function Replace-SheetTokens($Sheet, $Tokens) {
-    $used = $Sheet.UsedRange
-    $lastRow = $used.Row + $used.Rows.Count - 1
-    $lastColumn = $used.Column + $used.Columns.Count - 1
-    for ($row = $used.Row; $row -le $lastRow; $row++) {
-        Replace-RowTokens $Sheet $row $Tokens
-    }
+    Replace-RangeTokens $Sheet $Sheet.UsedRange $Tokens
 }
 
 function Expand-PrintAreaToUsedRows($Sheet) {
@@ -138,29 +163,39 @@ function Expand-PrintAreaToUsedRows($Sheet) {
 
 function Get-UnresolvedTokens($Sheet) {
     $tokens = @()
-    $used = $Sheet.UsedRange
-    $lastRow = $used.Row + $used.Rows.Count - 1
-    $lastColumn = $used.Column + $used.Columns.Count - 1
-    for ($row = $used.Row; $row -le $lastRow; $row++) {
-        for ($column = $used.Column; $column -le $lastColumn; $column++) {
-            $value = $Sheet.Cells.Item($row, $column).Value2
-            if ($value -is [string]) {
-                foreach ($match in [regex]::Matches($value, '\{\{[^{}]+\}\}')) {
-                    $tokens += $match.Value
-                }
+    $values = Get-RangeValues $Sheet.UsedRange
+    foreach ($value in $values) {
+        if ($value -is [string] -and $value.IndexOf('{{') -ge 0) {
+            foreach ($match in [regex]::Matches($value, '\{\{[^{}]+\}\}')) {
+                $tokens += $match.Value
             }
         }
     }
     return $tokens
 }
 
+function Initialize-Excel {
+    if ($null -ne $script:excel) {
+        try { $null = $script:excel.Version } catch { $script:excel = $null }
+    }
+    if ($null -eq $script:excel) {
+        $script:excel = New-Object -ComObject Excel.Application
+        $script:excel.Visible = $false
+        $script:excel.DisplayAlerts = $false
+        $script:excel.ScreenUpdating = $false
+        $script:excel.EnableEvents = $false
+    }
+}
+
+function Invoke-Document([string]$PayloadPath) {
+$workbook = $null
+$sheets = $null
+$allSheets = $null
 try {
     $payload = Get-Content -LiteralPath $PayloadPath -Encoding UTF8 -Raw | ConvertFrom-Json
-    $excel = New-Object -ComObject Excel.Application
-    $excel.Visible = $false
-    $excel.DisplayAlerts = $false
-    $excel.ScreenUpdating = $false
-    $workbook = $excel.Workbooks.Open($payload.template_path, 0, $false)
+    Initialize-Excel
+    $workbook = $script:excel.Workbooks.Open($payload.template_path, 0, $false)
+    $script:excel.Calculation = -4135
     $worksheetCount = $workbook.Worksheets.Count
 
     if ($payload.document_type -eq 'job_card') {
@@ -229,12 +264,8 @@ try {
         $distinct = ($unresolved | Sort-Object -Unique) -join ', '
         throw "The template contains unknown or unsupported placeholders: $distinct"
     }
-    $excel.CalculateFull()
+    $script:excel.CalculateFull()
     $workbook.ExportAsFixedFormat(0, $payload.output_path, 0, $true, $false)
-}
-catch {
-    [Console]::Error.WriteLine($_.Exception.Message)
-    exit 1
 }
 finally {
     if ($null -ne $sheets) {
@@ -252,11 +283,32 @@ finally {
     $sourceRow = $null
     $targetRow = $null
     if ($null -ne $workbook) {
-        $workbook.Close($false)
+        try { $workbook.Close($false) } catch { }
         [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($workbook)
     }
+}
+}
+
+try {
+    while ($true) {
+        $line = [Console]::In.ReadLine()
+        if ($null -eq $line) { break }
+        $line = $line.Trim()
+        if (-not $line) { continue }
+        try {
+            if ($line -eq 'WARMUP') { Initialize-Excel }
+            else { Invoke-Document $line }
+            [Console]::Out.WriteLine('OK')
+        }
+        catch {
+            $message = ($_.Exception.Message -replace '\s+', ' ')
+            [Console]::Out.WriteLine('ERR ' + $message)
+        }
+    }
+}
+finally {
     if ($null -ne $excel) {
-        $excel.Quit()
+        try { $excel.Quit() } catch { }
         [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($excel)
     }
     [GC]::Collect()
@@ -277,6 +329,9 @@ def _format_date(value):
 
 def _get_items(data):
     items = [dict(item) for item in data.get("items", [])]
+    for item in items:
+        if not str(item.get("req_date", "")).strip():
+            item["req_date"] = data.get("required_date", "")
     if not items and "operations" in data:
         items = [{
             "name": data.get("name", "Main Part"),
@@ -392,6 +447,8 @@ def _build_job_cards(data, common_values):
         item_values = _item_values(item, index, legacy_markup)
         values = dict(common_values)
         values.update(item_values)
+        if len(items) > 1:
+            values["order_number"] = f"{common_values.get('order_number', '')}/{index}"
         values["item_material_cost"] = item_values["material_unit_cost"]
         operation_rows = []
         for operation_index, operation in enumerate(item.get("operations", []), start=1):
@@ -414,9 +471,102 @@ def _safe_number(value):
     )
 
 
-def generate_excel_document(document_type, data, settings):
+def _stop_worker():
+    global _worker
+    worker, _worker = _worker, None
+    if worker is None:
+        return
+    process = worker[0]
+    try:
+        process.stdin.close()
+    except OSError:
+        pass
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+
+
+def _ensure_worker():
+    global _worker, _script_directory
+    if _worker is not None and _worker[0].poll() is None:
+        return _worker
+    _worker = None
     import shutil
 
+    powershell = shutil.which("powershell.exe")
+    if not powershell:
+        raise RuntimeError("Windows PowerShell is required to export Excel templates to PDF.")
+    if _script_directory is None:
+        _script_directory = tempfile.mkdtemp(prefix="wyceny_excel_worker_")
+        atexit.register(shutil.rmtree, _script_directory, True)
+    script_path = os.path.join(_script_directory, "worker.ps1")
+    with open(script_path, "w", encoding="utf-8") as script_file:
+        script_file.write(POWERSHELL_SCRIPT)
+    process = subprocess.Popen(
+        [
+            powershell,
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            script_path,
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    responses = queue.Queue()
+
+    def read_responses():
+        for raw_line in iter(process.stdout.readline, b""):
+            responses.put(raw_line.decode("utf-8-sig", "replace").strip())
+        responses.put(None)
+
+    threading.Thread(target=read_responses, daemon=True).start()
+    _worker = (process, responses)
+    return _worker
+
+
+def _worker_request(line, timeout):
+    with _worker_lock:
+        process, responses = _ensure_worker()
+        try:
+            process.stdin.write((line + "\n").encode("utf-8"))
+            process.stdin.flush()
+        except OSError as exc:
+            _stop_worker()
+            raise RuntimeError("The Excel export process stopped unexpectedly.") from exc
+        try:
+            response = responses.get(timeout=timeout)
+        except queue.Empty:
+            process.kill()
+            _stop_worker()
+            raise RuntimeError("Excel took too long to export the document to PDF.")
+        if response is None:
+            _stop_worker()
+            raise RuntimeError("The Excel export process stopped unexpectedly.")
+        return response
+
+
+def prewarm_excel():
+    """Starts the hidden Excel instance in the background so the first PDF is fast."""
+
+    def warm_up():
+        try:
+            _worker_request("WARMUP", timeout=120)
+        except RuntimeError:
+            pass
+
+    threading.Thread(target=warm_up, daemon=True).start()
+
+
+atexit.register(_stop_worker)
+
+
+def generate_excel_document(document_type, data, settings):
     if document_type not in DOCUMENT_LABELS:
         raise RuntimeError(f"Unknown Excel document type: {document_type}")
     if document_type in ("delivery_note", "job_card") and data.get("status") != "order":
@@ -435,6 +585,8 @@ def generate_excel_document(document_type, data, settings):
             f"Choose an Excel template for {DOCUMENT_LABELS[document_type]} "
             "in Settings > Excel Templates."
         )
+    if not os.path.isabs(template_path):
+        template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), template_path)
     if not os.path.isfile(template_path):
         raise RuntimeError(f"The Excel template file does not exist: {template_path}")
     if os.path.splitext(template_path)[1].lower() != ".xlsx":
@@ -458,6 +610,13 @@ def generate_excel_document(document_type, data, settings):
     if output_directory and not os.path.isdir(output_directory):
         raise RuntimeError(f"PDF save folder does not exist: {output_directory}")
     output_path = os.path.abspath(os.path.join(output_directory or os.getcwd(), filename))
+    if os.path.exists(output_path):
+        try:
+            os.remove(output_path)
+        except OSError:
+            # The previous PDF is still open in a viewer; save under a new name.
+            stem, extension = os.path.splitext(output_path)
+            output_path = f"{stem}_{datetime.now().strftime('%H%M%S')}{extension}"
 
     common_values = _common_values(document_type, data, settings)
     payload = {
@@ -477,44 +636,15 @@ def generate_excel_document(document_type, data, settings):
             for index, item in enumerate(items, start=1)
         ]
 
-    powershell = shutil.which("powershell.exe")
-    if not powershell:
-        raise RuntimeError("Windows PowerShell is required to export Excel templates to PDF.")
-
     with tempfile.TemporaryDirectory(prefix="wyceny_excel_") as temporary_directory:
         payload_path = os.path.join(temporary_directory, "document.json")
-        script_path = os.path.join(temporary_directory, "export.ps1")
         with open(payload_path, "w", encoding="utf-8") as payload_file:
             json.dump(payload, payload_file, ensure_ascii=False)
-        with open(script_path, "w", encoding="utf-8") as script_file:
-            script_file.write(POWERSHELL_SCRIPT)
-        try:
-            result = subprocess.run(
-                [
-                    powershell,
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-File",
-                    script_path,
-                    payload_path,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=120,
-                check=False,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise RuntimeError("Excel took too long to export the document to PDF.") from exc
+        response = _worker_request(payload_path, timeout=120)
 
-    if result.returncode:
-        error = (
-            result.stderr.strip()
-            or result.stdout.strip()
-            or "Excel could not export the document."
-        )
-        raise RuntimeError(re.sub(r"\s+", " ", error))
+    if response != "OK":
+        error = response[4:] if response.startswith("ERR ") else response
+        raise RuntimeError(error.strip() or "Excel could not export the document.")
     if not os.path.isfile(output_path):
         raise RuntimeError("Excel reported success but the PDF file was not created.")
     return output_path

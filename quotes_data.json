@@ -1,1 +1,97 @@
-[]
+[
+    {
+        "number": 2000,
+        "name": "Rfq123099",
+        "discount": 0.0,
+        "required_date": "2026-11-29",
+        "required_date_option": "Specific date",
+        "customer": {
+            "name": "Oilenco",
+            "address": "Silvertrees Business Park\t, \nWesthill\t, Aberdeen\t, AB32 6BH",
+            "contact": "Donna Bain",
+            "phone": "1224555666",
+            "email": "DBain@oilenco.com"
+        },
+        "items": [
+            {
+                "name": "Top Sub",
+                "req_date": "2026-11-27",
+                "drawing_number": "45547",
+                "revision": "1",
+                "quantity": 1,
+                "markup": 40.0,
+                "material": "316",
+                "material_cost": 245.0,
+                "supplier": "",
+                "mct_number": "",
+                "cast": "",
+                "operations": [
+                    {
+                        "type": "Turning & Milling",
+                        "time": 20.0,
+                        "rate": 70.0,
+                        "cost": 1400.0
+                    },
+                    {
+                        "type": "QPQ",
+                        "time": 1.0,
+                        "rate": 60.0,
+                        "cost": 60.0
+                    }
+                ]
+            },
+            {
+                "name": "Bottom Sub",
+                "req_date": "2026-11-29",
+                "drawing_number": "55552",
+                "revision": "1",
+                "quantity": 1,
+                "markup": 40.0,
+                "material": "316",
+                "material_cost": 125.0,
+                "supplier": "",
+                "mct_number": "",
+                "cast": "",
+                "operations": [
+                    {
+                        "type": "Turning & Milling",
+                        "time": 6.0,
+                        "rate": 70.0,
+                        "cost": 420.0
+                    },
+                    {
+                        "type": "QPQ",
+                        "time": 1.0,
+                        "rate": 60.0,
+                        "cost": 60.0
+                    }
+                ]
+            },
+            {
+                "name": "Ring",
+                "req_date": "2026-11-29",
+                "drawing_number": "555555",
+                "revision": "1",
+                "quantity": 15,
+                "markup": 40.0,
+                "material": "4145",
+                "material_cost": 5.0,
+                "supplier": "",
+                "mct_number": "",
+                "cast": "",
+                "operations": [
+                    {
+                        "type": "Turning",
+                        "time": 0.25,
+                        "rate": 70.0,
+                        "cost": 17.5
+                    }
+                ]
+            }
+        ],
+        "status": "order",
+        "order_status": "Pending",
+        "job_card_generated": true,
+        "job_card_generated_date": "03.11.2026"
+    }
+]

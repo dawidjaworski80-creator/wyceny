@@ -7,7 +7,7 @@
     "Starting_Quote_No": 3001,
     "Starting_Order_No": 2000,
     "Starting_Delivery_Note_No": 200,
-    "Software_End_Date": "2027-03-31 13:05",
+    "Software_End_Date": "2027-03-11 23:59",
     "Company_Name": "247 Machining Services Ltd.",
     "Company_Address": "Unit 2 Meikle Clinterty, Kinellar, Aberdeen",
     "Company_Postcode": "AB21 0TZ",
@@ -15,6 +15,11 @@
     "VAT_Reg_No": "299 0513 74",
     "Company_Phone_Landline": "01224 791430",
     "Company_Phone_Mobile": "",
+    "Excel_Templates": {
+        "quote": "C:\\Users\\Dawid.Jaworski\\Desktop\\wyceny\\templates\\quote.xlsx",
+        "delivery_note": "C:\\Users\\Dawid.Jaworski\\Desktop\\wyceny\\templates\\delivery_note.xlsx",
+        "job_card": "C:\\Users\\Dawid.Jaworski\\Desktop\\wyceny\\templates\\job_card.xlsx"
+    },
     "Logo_Path": "C:/Users/Dawid.Jaworski/Desktop/247 Machining Services - Logo Files/Logo Files/JPG/WhiteBackground -Black Text - Full Colour.jpg",
     "Pdf_Output_Directory": "C:/Users/Dawid.Jaworski/Desktop/PDF",
     "saw cutting": 20.0,
@@ -346,5 +351,7 @@
                 "show_table_lines": true
             }
         ]
-    }
+    },
+    "QPQ": 60.0,
+    "Turning & Milling": 70.0
 }

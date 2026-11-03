@@ -778,11 +778,18 @@ class CncQuotesApp:
             visible_quotes = [q for q in self.quotes if q.get("status", "quote") != "order"]
             self.view_label.config(text="Quotes")
 
-        visible_columns = (
-            ("number", "customer", "customer_po", "name", "required_date", "gross_total", "order_status", "job_card")
-            if self.current_view == "orders"
-            else ("number", "customer", "name", "required_date", "gross_total", "order_status", "job_card")
-        )
+        if self.current_view == "orders":
+            visible_columns = (
+                "number", "customer", "customer_po", "name", "required_date",
+                "gross_total", "order_status", "job_card",
+            )
+        elif self.current_view == "quotes":
+            visible_columns = ("number", "customer", "name", "required_date", "gross_total")
+        else:
+            visible_columns = (
+                "number", "customer", "name", "required_date",
+                "gross_total", "order_status", "job_card",
+            )
         data_columns = tuple(self.tree["columns"])
         column_indices = {column: index for index, column in enumerate(data_columns)}
         display_columns = []
@@ -4181,6 +4188,7 @@ class CncQuotesApp:
             "Starting_Quote_No",
             "Starting_Order_No",
             "Starting_Delivery_Note_No",
+            "Software_End_Date",
             "Logo_Path",
             "Pdf_Output_Directory",
             "Company_Name",
@@ -4389,7 +4397,7 @@ class CncQuotesApp:
             side=tk.LEFT, padx=10
         )
 
-    def open_item_window(self, parent_win, item_list, refresh_callback, item_index=None):
+    def open_item_window(self, parent_win, item_list, refresh_callback, item_index=None, default_required_date=""):
         if self.show_changes_blocked(parent_win):
             return
 
@@ -4421,6 +4429,8 @@ class CncQuotesApp:
 
         tk.Label(info_frame, text="Required Date:").grid(row=1, column=0, sticky="e", pady=5)
         stored_item_date = str(item_data.get("req_date", "")).strip() if is_editing else ""
+        if not is_editing:
+            stored_item_date = str(default_required_date or "").strip()
         parsed_item_date = None
         for date_format in ("%Y-%m-%d", "%d.%m.%Y", "%Y/%m/%d"):
             try:
@@ -4550,6 +4560,7 @@ class CncQuotesApp:
             "Starting_Quote_No",
             "Starting_Order_No",
             "Starting_Delivery_Note_No",
+            "Software_End_Date",
             "Logo_Path",
             "Pdf_Output_Directory",
             "Company_Name",
@@ -4572,6 +4583,21 @@ class CncQuotesApp:
         ent_time = tk.Entry(add_op_frame, width=10)
         ent_time.pack(side=tk.LEFT, padx=5)
         self.clear_zero_on_click(ent_time)
+
+        tk.Label(add_op_frame, text="Rate (/h):").pack(side=tk.LEFT, padx=(10, 5))
+        ent_op_rate = tk.Entry(add_op_frame, width=8, justify="right")
+        ent_op_rate.pack(side=tk.LEFT, padx=5)
+
+        def fill_default_rate(event=None):
+            ent_op_rate.delete(0, tk.END)
+            try:
+                default_rate = float(self.settings.get(cb_type.get(), 0.0) or 0.0)
+            except (TypeError, ValueError):
+                default_rate = 0.0
+            ent_op_rate.insert(0, f"{default_rate:.2f}")
+
+        cb_type.bind("<<ComboboxSelected>>", fill_default_rate)
+        fill_default_rate()
 
         columns_op = ("type", "time", "rate", "cost")
         op_tree_frame = tk.Frame(op_frame)
@@ -4737,12 +4763,20 @@ class CncQuotesApp:
                 messagebox.showwarning("Error", "Time must be a number!", parent=win)
                 return
 
-            rate = self.settings.get(op_type, 0.0)
+            rate_str = ent_op_rate.get().strip().replace(",", ".")
+            try:
+                rate = float(rate_str) if rate_str else float(self.settings.get(op_type, 0.0) or 0.0)
+                if not math.isfinite(rate) or rate < 0:
+                    raise ValueError
+            except ValueError:
+                messagebox.showwarning("Error", "Rate must be a non-negative number!", parent=win)
+                return
             cost = op_time * rate
 
             temp_operations.append({"type": op_type, "time": op_time, "rate": rate, "cost": cost})
             refresh_operations(resize_window=True)
             ent_time.delete(0, tk.END)
+            fill_default_rate()
 
         def delete_operation():
             if self.show_changes_blocked(win):
@@ -4768,6 +4802,8 @@ class CncQuotesApp:
             cb_type.set(op["type"])
             ent_time.delete(0, tk.END)
             ent_time.insert(0, str(op["time"]))
+            ent_op_rate.delete(0, tk.END)
+            ent_op_rate.insert(0, f"{float(op['rate']):.2f}")
             refresh_operations(resize_window=True)
 
         op_tree.bind("<Double-1>", edit_operation_on_double_click)
@@ -4918,7 +4954,10 @@ class CncQuotesApp:
         is_order = bool(quote_data and quote_data.get("status") == "order")
         window.title("Order Details" if is_order else "Quote Details")
         window.geometry("950x800")
-        self.maximize_window(window)
+        if is_order:
+            self.maximize_window(window)
+        else:
+            window.resizable(True, True)
         window.grab_set()
 
         if quote_data is None:
@@ -5276,7 +5315,7 @@ class CncQuotesApp:
             height=8,
         )
         items_tree.heading("#0", text="Line")
-        items_tree.column("#0", width=45, anchor=tk.CENTER, stretch=False)
+        items_tree.column("#0", width=95 if is_order else 45, anchor=tk.CENTER, stretch=False)
         items_tree.heading("name", text="Item Name")
         items_tree.heading("drawing_number", text="Drawing Number")
         items_tree.heading("revision", text="Revision")
@@ -5362,7 +5401,11 @@ class CncQuotesApp:
                     "",
                     tk.END,
                     iid=str(idx),
-                    text=str(idx + 1),
+                    text=(
+                        f"{new_number}/{idx + 1}"
+                        if is_order and len(temp_items) > 1
+                        else str(idx + 1)
+                    ),
                     values=(
                         item.get("name", ""),
                         item.get("drawing_number", ""),
@@ -5528,7 +5571,12 @@ class CncQuotesApp:
                 return
             if is_order:
                 return
-            self.open_item_window(window, temp_items, refresh_items_and_totals)
+            self.open_item_window(
+                window,
+                temp_items,
+                refresh_items_and_totals,
+                default_required_date=required_date_var.get().strip(),
+            )
 
         def edit_item_cmd(event=None):
             if self.show_changes_blocked(window):
@@ -5880,6 +5928,25 @@ class CncQuotesApp:
                 bg="#2563EB",
                 fg="white",
             ).pack(side=tk.LEFT, padx=5)
+
+        if not is_order:
+            font = tkfont.nametofont("TkDefaultFont")
+            heading_font = tkfont.nametofont("TkHeadingFont")
+            tree_width = 45 + 8 * (len(columns_items) - 1) + 24
+            for column in columns_items:
+                width = heading_font.measure(str(items_tree.heading(column, "text"))) + 24
+                for iid in items_tree.get_children(""):
+                    width = max(width, font.measure(str(items_tree.set(iid, column))) + 24)
+                items_tree.column(column, width=width, stretch=True)
+                tree_width += width
+            window.update_idletasks()
+            screen_w = window.winfo_screenwidth()
+            screen_h = window.winfo_screenheight()
+            fit_width = min(max(window.winfo_reqwidth(), tree_width + 40), screen_w - 40)
+            fit_height = min(window.winfo_reqheight(), screen_h - 80)
+            window.geometry(
+                f"{fit_width}x{fit_height}+{(screen_w - fit_width) // 2}+{max(0, (screen_h - fit_height) // 3)}"
+            )
 
     def save_and_generate_quote_pdf(self, save_callback, quote_data, parent):
         if self.software_is_expired():
@@ -6572,6 +6639,12 @@ def run_splash_screen(root, settings, duration_ms=2500):
 if __name__ == "__main__":
     root = tk.Tk()
     root.withdraw()
+    try:
+        from excel_templates import prewarm_excel
+
+        prewarm_excel()
+    except ImportError:
+        pass
     run_splash_screen(root, DataStore().load_settings())
     app = CncQuotesApp(root)
     root.deiconify()
