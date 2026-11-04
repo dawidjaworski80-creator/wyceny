@@ -9,6 +9,8 @@ import tempfile
 import threading
 from datetime import date, datetime
 
+from data_store import clean_address
+
 _worker = None
 _script_directory = None
 _worker_lock = threading.Lock()
@@ -25,6 +27,11 @@ $ErrorActionPreference = 'Stop'
 [Console]::InputEncoding = New-Object System.Text.UTF8Encoding($false)
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $excel = $null
+$script:moneyKeys = @(
+    'unit_price', 'line_total', 'material_unit_cost', 'item_material_cost',
+    'subtotal', 'discount_amount', 'net_total', 'vat_amount', 'grand_total',
+    'operation_rate', 'operation_cost'
+)
 
 function ConvertTo-Map($Object) {
     $result = @{}
@@ -58,6 +65,9 @@ function Set-CellTokens($Cell, $Value, $Tokens) {
                 $Cell.Value2 = $replacement
             }
             else {
+                if ($script:moneyKeys -contains $key) {
+                    $Cell.NumberFormat = '0.00'
+                }
                 $Cell.Formula = [string]$replacement
             }
         }
@@ -412,7 +422,7 @@ def _common_values(document_type, data, settings):
         "document_date": now,
         "required_date": _format_date(data.get("required_date", "")),
         "customer_name": str(customer.get("name", "")),
-        "customer_address": str(customer.get("address", "")),
+        "customer_address": clean_address(customer.get("address", "")),
         "customer_contact": str(customer.get("contact", "")),
         "customer_phone": str(customer.get("phone", "")),
         "customer_email": str(customer.get("email", "")),

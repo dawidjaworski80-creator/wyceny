@@ -2,6 +2,8 @@ from copy import deepcopy
 from datetime import datetime
 import math
 
+from data_store import clean_address
+
 
 PAGE_WIDTH = 210
 PAGE_HEIGHT = 297
@@ -202,7 +204,11 @@ def _customer_details(data):
         customer = {"name": str(customer)}
     lines = [str(customer.get("name", ""))]
     for key in ("address", "contact", "phone", "email"):
-        value = str(customer.get(key, "")).strip()
+        value = (
+            clean_address(customer.get(key, ""))
+            if key == "address"
+            else str(customer.get(key, "")).strip()
+        )
         if value:
             lines.append(value if key == "address" else f"{key.title()}: {value}")
     return "\n".join(line for line in lines if line)

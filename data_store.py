@@ -1,6 +1,17 @@
 import json
 import os
+import re
 from typing import Any, Dict, List
+
+
+def clean_address(value: Any) -> str:
+    """Replace tabs/control characters (shown as boxes in documents) with plain text."""
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[^\S\n]+", " ", text)
+    text = re.sub(r"[^\n\x20-\uFFFF]", "", text)
+    text = re.sub(r" +,", ",", text)
+    text = re.sub(r" *\n *", "\n", text)
+    return text.strip()
 
 
 class DataStore:

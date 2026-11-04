@@ -9,7 +9,7 @@ import re
 import tempfile
 import time
 
-from data_store import DataStore
+from data_store import DataStore, clean_address
 from email_service import EmailService
 from pdf_service import PdfService
 from pdf_layouts import (
@@ -1280,7 +1280,7 @@ class CncQuotesApp:
                     return
 
                 updated_customers = deepcopy(self.customers)
-                updated_address = address_entry.get("1.0", tk.END).strip()
+                updated_address = clean_address(address_entry.get("1.0", tk.END))
                 if add_contact_mode and not new_contact_name:
                     messagebox.showwarning(
                         "Contact required",
@@ -5613,12 +5613,20 @@ class CncQuotesApp:
             details_window = tk.Toplevel(window)
             details_window.title(f"Order Item Details - {item.get('name', 'Item')}")
             details_window.geometry("720x520")
-            self.maximize_window(details_window)
             details_window.transient(window)
+
+            button_frame = tk.Frame(details_window)
+            button_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=12, pady=10)
 
             details_frame = tk.LabelFrame(details_window, text="Item Details")
             details_frame.pack(fill=tk.X, padx=12, pady=10)
             details_frame.columnconfigure(1, weight=1)
+            editable_fields = {}
+            editable_keys = {
+                "Supplier:": "supplier",
+                "MCT Number:": "mct_number",
+                "Cast:": "cast",
+            }
             for row, (label, value) in enumerate((
                 ("Item Name:", item.get("name", "")),
                 ("Drawing Number:", item.get("drawing_number", "")),
@@ -5638,12 +5646,51 @@ class CncQuotesApp:
                     padx=6,
                     pady=4,
                 )
-                tk.Label(
-                    details_frame,
-                    text=value or "-",
-                    anchor=tk.W,
-                    justify=tk.LEFT,
-                ).grid(row=row, column=1, sticky="ew", padx=6, pady=4)
+                editable_key = editable_keys.get(label)
+                if editable_key == "supplier":
+                    field = ttk.Combobox(
+                        details_frame,
+                        values=sorted(self.suppliers, key=str.casefold),
+                    )
+                    field.set(str(value or ""))
+                    editable_fields[editable_key] = field
+                    field.grid(row=row, column=1, sticky="ew", padx=6, pady=4)
+                elif editable_key:
+                    field = tk.Entry(details_frame)
+                    field.insert(0, str(value or ""))
+                    editable_fields[editable_key] = field
+                    field.grid(row=row, column=1, sticky="ew", padx=6, pady=4)
+                else:
+                    tk.Label(
+                        details_frame,
+                        text=value or "-",
+                        anchor=tk.W,
+                        justify=tk.LEFT,
+                    ).grid(row=row, column=1, sticky="ew", padx=6, pady=4)
+
+            def apply_item_detail_changes():
+                if self.show_changes_blocked(window):
+                    return
+
+                supplier_name = editable_fields["supplier"].get().strip()
+                if supplier_name and supplier_name not in self.suppliers:
+                    updated_suppliers = dict(self.suppliers)
+                    updated_suppliers[supplier_name] = {"address": "", "contact": ""}
+                    try:
+                        self.store.save_suppliers(updated_suppliers)
+                    except OSError as exc:
+                        messagebox.showerror(
+                            "Supplier save failed",
+                            f"Could not save supplier to the database:\n{exc}",
+                            parent=details_window,
+                        )
+                        return
+                    self.suppliers = updated_suppliers
+
+                item["supplier"] = supplier_name
+                item["mct_number"] = editable_fields["mct_number"].get().strip()
+                item["cast"] = editable_fields["cast"].get().strip()
+                refresh_items_and_totals()
 
             planned_hours = self.get_planned_operation_hours(item)
             actual_hours = item.get("actual_work_hours")
@@ -5695,8 +5742,17 @@ class CncQuotesApp:
             operation_tree.column("time", width=150, anchor=tk.CENTER)
             operation_tree.column("rate", width=120, anchor=tk.E)
             operation_tree.column("cost", width=120, anchor=tk.E)
-            operation_tree.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
-            for line_number, operation in enumerate(item.get("operations", []), start=1):
+            operations = item.get("operations", [])
+            operation_tree.configure(height=max(1, min(len(operations), 12)))
+            operation_scrollbar = ttk.Scrollbar(
+                operation_frame,
+                orient=tk.VERTICAL,
+                command=operation_tree.yview,
+            )
+            operation_tree.configure(yscrollcommand=operation_scrollbar.set)
+            operation_scrollbar.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 6), pady=6)
+            operation_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(6, 0), pady=6)
+            for line_number, operation in enumerate(operations, start=1):
                 operation_tree.insert(
                     "",
                     tk.END,
@@ -5710,11 +5766,34 @@ class CncQuotesApp:
                 )
 
             tk.Button(
-                details_window,
+                button_frame,
+                text="Apply Changes",
+                command=apply_item_detail_changes,
+                width=16,
+            ).pack(side=tk.RIGHT, padx=6)
+            tk.Button(
+                button_frame,
                 text="Close",
                 command=details_window.destroy,
                 width=12,
-            ).pack(side=tk.RIGHT, padx=12, pady=10)
+            ).pack(side=tk.RIGHT, padx=6)
+
+            details_window.update_idletasks()
+            screen_width = details_window.winfo_screenwidth()
+            screen_height = details_window.winfo_screenheight()
+            fit_width = min(
+                max(details_window.winfo_reqwidth(), 720),
+                max(1, screen_width - 40),
+            )
+            fit_height = min(
+                details_window.winfo_reqheight(),
+                max(1, screen_height - 80),
+            )
+            details_window.geometry(
+                f"{fit_width}x{fit_height}+"
+                f"{max(0, (screen_width - fit_width) // 2)}+"
+                f"{max(0, (screen_height - fit_height) // 3)}"
+            )
 
         item_action_state = tk.DISABLED if is_order else tk.NORMAL
         if is_order:
@@ -5812,7 +5891,7 @@ class CncQuotesApp:
                     )
                     return False
 
-            cust_address = ent_cust_addr.get("1.0", tk.END).strip()
+            cust_address = clean_address(ent_cust_addr.get("1.0", tk.END))
             cust_contact = cb_cust_contact.get().strip()
             cust_phone = ent_cust_phone.get().strip()
             cust_email = ent_cust_email.get().strip()
