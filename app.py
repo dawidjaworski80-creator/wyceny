@@ -5113,7 +5113,7 @@ class CncQuotesApp:
 
         tk.Label(customer_frame, text="Company Name:").grid(row=0, column=0, sticky="e", padx=5, pady=5)
         cb_cust_name = ttk.Combobox(customer_frame, width=32)
-        cb_cust_name["values"] = list(self.customers.keys())
+        cb_cust_name["values"] = sorted(self.customers, key=str.casefold)
         cb_cust_name.grid(row=0, column=1, padx=5, pady=5)
         self.capitalize_words_on_focus_out(cb_cust_name)
 
@@ -5159,8 +5159,37 @@ class CncQuotesApp:
             set_entry(ent_cust_phone, "")
             set_entry(ent_cust_email, "")
 
+        def update_customer_suggestions(event=None):
+            if event and event.keysym in {
+                "Alt_L", "Alt_R", "Caps_Lock", "Control_L", "Control_R",
+                "Down", "Escape", "Return", "Shift_L", "Shift_R", "Tab", "Up",
+            }:
+                return
+
+            typed_name = cb_cust_name.get().strip()
+            customer_names = sorted(self.customers, key=str.casefold)
+            if not typed_name:
+                cb_cust_name["values"] = customer_names
+                return
+
+            matches = [
+                name
+                for name in customer_names
+                if name.casefold().startswith(typed_name.casefold())
+            ]
+            cb_cust_name["values"] = matches
+            if matches:
+                cb_cust_name.tk.call("ttk::combobox::Post", cb_cust_name)
+            else:
+                cb_cust_name.tk.call("ttk::combobox::Unpost", cb_cust_name)
+
+        def restore_customer_suggestions(event=None):
+            cb_cust_name["values"] = sorted(self.customers, key=str.casefold)
+            fill_company_details()
+
+        cb_cust_name.bind("<KeyRelease>", update_customer_suggestions, add="+")
         cb_cust_name.bind("<<ComboboxSelected>>", fill_company_details)
-        cb_cust_name.bind("<FocusOut>", fill_company_details)
+        cb_cust_name.bind("<FocusOut>", restore_customer_suggestions, add="+")
         cb_cust_contact.bind("<<ComboboxSelected>>", fill_contact_details)
 
         if quote_data:
@@ -5910,7 +5939,7 @@ class CncQuotesApp:
             self.customers[cust_name] = company_data
 
             self.save_customers()
-            cb_cust_name["values"] = list(self.customers.keys())
+            cb_cust_name["values"] = sorted(self.customers, key=str.casefold)
             cb_cust_contact["values"] = list(company_data["contacts"].keys())
 
             customer_snapshot = {

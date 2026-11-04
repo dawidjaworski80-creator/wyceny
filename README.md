@@ -42,7 +42,7 @@ python main.py
 
 ## Baza klientów
 
-Dane firm i osób kontaktowych są zapisywane w `customers_data.json`. Przycisk **Customer Database** otwiera bazę klientów. Przycisk **+** otwiera formularz dodawania nowej firmy, a dwuklik w wiersz na liście otwiera formularz edycji. W formularzu edycji można również usunąć wybraną osobę kontaktową lub firmę. Przy dodawaniu firmy osoba kontaktowa jest opcjonalna; adres jest zapamiętywany dla firmy, a każda osoba kontaktowa ma osobny zapis telefonu i e-maila. Wybór zapisanej firmy i osoby automatycznie uzupełnia te dane w formularzu wyceny. Dotychczasowy format pliku klientów jest konwertowany do nowego formatu przy uruchomieniu aplikacji.
+Dane firm i osób kontaktowych są zapisywane w `customers_data.json`. Przycisk **Customer Database** otwiera bazę klientów. Przycisk **+** otwiera formularz dodawania nowej firmy, a dwuklik w wiersz na liście otwiera formularz edycji. W formularzu edycji można również usunąć wybraną osobę kontaktową lub firmę. Przy dodawaniu firmy osoba kontaktowa jest opcjonalna; adres jest zapamiętywany dla firmy, a każda osoba kontaktowa ma osobny zapis telefonu i e-maila. W formularzu wyceny wpisanie pierwszych liter nazwy firmy pokazuje pasujące podpowiedzi z bazy; wybór firmy automatycznie uzupełnia zapisane dane. Dotychczasowy format pliku klientów jest konwertowany do nowego formatu przy uruchomieniu aplikacji.
 
 ## Baza dostawców i materiały
 
