@@ -7,7 +7,7 @@
         "required_date_option": "Specific date",
         "customer": {
             "name": "Oilenco",
-            "address": "Silvertrees Business Park\t, \nWesthill\t, Aberdeen\t, AB32 6BH",
+            "address": "Silvertrees Business Park,\nWesthill, Aberdeen, AB32 6BH",
             "contact": "Donna Bain",
             "phone": "1224555666",
             "email": "DBain@oilenco.com"
@@ -93,44 +93,7 @@
         "order_status": "Pending",
         "job_card_generated": true,
         "job_card_generated_date": "04.11.2026",
-        "customer_po_number": "PO087761"
-    },
-    {
-        "number": 3001,
-        "name": "Donna1234",
-        "discount": 0.0,
-        "required_date": "2026-11-18",
-        "required_date_option": "2 weeks",
-        "customer": {
-            "name": "Oilenco",
-            "address": "Silvertrees Business Park,\nWesthill, Aberdeen, AB32 6BH",
-            "contact": "Donna Bain",
-            "phone": "1224555666",
-            "email": "DBain@oilenco.com"
-        },
-        "items": [
-            {
-                "name": "Sleeve",
-                "req_date": "2026-11-18",
-                "drawing_number": "22221",
-                "revision": "1",
-                "quantity": 1,
-                "markup": 40.0,
-                "material": "120mm Od X 200 Mm Long 4145",
-                "material_cost": 60.0,
-                "supplier": "Stock",
-                "mct_number": "2542",
-                "cast": "655684",
-                "operations": [
-                    {
-                        "type": "Turning & Milling",
-                        "time": 6.0,
-                        "rate": 70.0,
-                        "cost": 420.0
-                    }
-                ]
-            }
-        ],
-        "status": "quote"
+        "customer_po_number": "PO087761",
+        "delivery_note_number": 200
     }
 ]
