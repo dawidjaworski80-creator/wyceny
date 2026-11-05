@@ -1,4 +1,4 @@
-﻿import calendar
+import calendar
 from copy import deepcopy
 import tkinter as tk
 from tkinter import font as tkfont, ttk, messagebox, filedialog, colorchooser, simpledialog
@@ -4512,6 +4512,7 @@ class CncQuotesApp:
             "Delivery_Notes_Folder",
             "Acknowledgments_Folder",
             "Data_Folder",
+            "Last_Quote_No",
             "Company_Name",
             "Company_Address",
             "Company_Postcode",
@@ -4888,6 +4889,7 @@ class CncQuotesApp:
             "Delivery_Notes_Folder",
             "Acknowledgments_Folder",
             "Data_Folder",
+            "Last_Quote_No",
             "Company_Name",
             "Company_Address",
             "Company_Postcode",
@@ -6293,6 +6295,7 @@ class CncQuotesApp:
                 new_data["status"] = "quote"
                 new_data["created_by"] = self.current_user
                 self.quotes.append(new_data)
+                self.remember_quote_number(new_data["number"])
             else:
                 if is_order:
                     selected_status = order_status_var.get()
@@ -6503,10 +6506,28 @@ class CncQuotesApp:
                 quote_numbers.append(int(record["quote_number"]))
             except (KeyError, TypeError, ValueError):
                 continue
+        try:
+            quote_numbers.append(int(self.settings.get("Last_Quote_No", 0)))
+        except (TypeError, ValueError):
+            pass
         if not quote_numbers:
             return starting_number
         highest_number = max(quote_numbers)
         return max(starting_number, highest_number + 1)
+
+    def remember_quote_number(self, number):
+        """Persist the highest quote number ever issued so numbers are never reused."""
+        try:
+            number = int(number)
+            if number <= int(self.settings.get("Last_Quote_No", 0) or 0):
+                return
+        except (TypeError, ValueError):
+            return
+        self.settings["Last_Quote_No"] = number
+        try:
+            self.save_settings()
+        except OSError:
+            pass
 
     def next_order_number(self):
         starting_number = int(self.settings.get("Starting_Order_No", 1))
@@ -6572,6 +6593,7 @@ class CncQuotesApp:
                 self.quotes.remove(pasted_quote)
             messagebox.showerror("Save failed", f"Could not paste the quote:\n{exc}")
             return
+        self.remember_quote_number(pasted_quote["number"])
         self.current_view = "quotes"
         self.refresh_list()
         messagebox.showinfo(
@@ -6778,6 +6800,7 @@ class CncQuotesApp:
             return
 
         order_number = self.next_order_number()
+        self.remember_quote_number(quote_data["number"])
         quote_data["quote_number"] = quote_data["number"]
         quote_data["status"] = "order"
         quote_data["number"] = order_number
@@ -6800,16 +6823,7 @@ class CncQuotesApp:
             return
 
         quote = deepcopy(order)
-        original_number = order.get("quote_number")
-        quote_numbers_in_use = {
-            str(record.get("number"))
-            for record in self.quotes
-            if record.get("status", "quote") != "order"
-        }
-        if original_number is not None and str(original_number) not in quote_numbers_in_use:
-            quote["number"] = original_number
-        else:
-            quote["number"] = self.next_quote_number()
+        quote["number"] = self.next_quote_number()
         quote.pop("quote_number", None)
         quote["status"] = "quote"
         quote["created_by"] = self.current_user
@@ -6840,6 +6854,7 @@ class CncQuotesApp:
                 f"Could not create a quote from the order:\n{exc}",
             )
             return
+        self.remember_quote_number(quote["number"])
 
         self.current_view = "quotes"
         self.refresh_list()
