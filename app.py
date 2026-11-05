@@ -2130,7 +2130,7 @@ class CncQuotesApp:
     def open_excel_templates_window(self, parent):
         win = tk.Toplevel(parent)
         win.title("Excel Templates")
-        win.geometry("760x300")
+        win.geometry("760x340")
         win.transient(parent)
         win.grab_set()
 
@@ -2138,6 +2138,7 @@ class CncQuotesApp:
             ("Quote", "quote"),
             ("Delivery Note", "delivery_note"),
             ("Job Card", "job_card"),
+            ("Order Acknowledgement", "order_acknowledgment"),
         )
         current_templates = self.settings.get("Excel_Templates", {})
         if not isinstance(current_templates, dict):
@@ -2184,7 +2185,8 @@ class CncQuotesApp:
         tk.Label(
             win,
             text=(
-                "Required table row markers: {{items_table}} for quotes and delivery notes; "
+                "Required table row markers: {{items_table}} for quotes, delivery notes and "
+                "order acknowledgements; "
                 "{{operations_table}} for job cards. Full placeholder list: README.md."
             ),
             justify=tk.LEFT,
@@ -6036,9 +6038,21 @@ class CncQuotesApp:
                 bg="#2563EB",
                 fg="white",
             ).pack(side=tk.LEFT, padx=5)
+            tk.Button(
+                bottom_frame,
+                text="Generate Order Acknowledgement",
+                command=lambda: self.save_and_generate_order_acknowledgment(
+                    save,
+                    quote_data,
+                    window,
+                ),
+                width=30,
+                bg="#059669",
+                fg="white",
+            ).pack(side=tk.LEFT, padx=5)
 
         if not is_order:
-            font = tkfont.nametofont("TkDefaultFont")
+            font =  tkfont.nametofont("TkDefaultFont")
             heading_font = tkfont.nametofont("TkHeadingFont")
             tree_width = 45 + 8 * (len(columns_items) - 1) + 24
             for column in columns_items:
@@ -6066,6 +6080,44 @@ class CncQuotesApp:
     def save_and_generate_delivery_note(self, save_callback, order, parent):
         if save_callback(close_window=False):
             self.generate_delivery_note(order, parent)
+
+    def save_and_generate_order_acknowledgment(self, save_callback, order, parent):
+        if save_callback(close_window=False):
+            self.generate_order_acknowledgment(order, parent)
+
+    def generate_order_acknowledgment(self, order=None, parent=None):
+        if order is None:
+            order = self.get_selected_quote()
+        if not order or order.get("status") != "order":
+            messagebox.showinfo(
+                "Information",
+                "Select an order to generate an order acknowledgement.",
+                parent=parent,
+            )
+            return
+
+        if self.show_changes_blocked(parent):
+            return
+
+        try:
+            filename = PdfService.generate_order_acknowledgment(order, self.settings)
+        except (RuntimeError, OSError) as exc:
+            messagebox.showerror("Order Acknowledgement Error", str(exc), parent=parent)
+            return
+
+        messagebox.showinfo(
+            "Success",
+            f"Order acknowledgement generated successfully as:\n{filename}",
+            parent=parent,
+        )
+        try:
+            os.startfile(filename)
+        except OSError as exc:
+            messagebox.showerror(
+                "Open PDF Error",
+                f"The order acknowledgement was saved, but could not be opened:\n{exc}",
+                parent=parent,
+            )
 
     def save_and_email_quote(self, save_callback, quote_data, parent):
         if self.software_is_expired():

@@ -7,6 +7,10 @@ class PdfService:
         return generate_excel_document("delivery_note", order_data, settings)
 
     @staticmethod
+    def generate_order_acknowledgment(order_data: dict, settings: dict):
+        return generate_excel_document("order_acknowledgment", order_data, settings)
+
+    @staticmethod
     def generate_job_card(order_data: dict, settings: dict):
         return generate_excel_document("job_card", order_data, settings)
 

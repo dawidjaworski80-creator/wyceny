@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import sys
 from typing import Any, Dict, List
 
 
@@ -16,7 +17,11 @@ def clean_address(value: Any) -> str:
 
 class DataStore:
     def __init__(self, base_dir: str = None):
-        self.base_dir = base_dir or os.path.dirname(os.path.abspath(__file__))
+        if getattr(sys, "frozen", False):
+            default_dir = os.path.dirname(sys.executable)
+        else:
+            default_dir = os.path.dirname(os.path.abspath(__file__))
+        self.base_dir = base_dir or default_dir
         self.data_file = os.path.join(self.base_dir, "quotes_data.json")
         self.settings_file = os.path.join(self.base_dir, "cnc_settings.json")
         self.customers_file = os.path.join(self.base_dir, "customers_data.json")

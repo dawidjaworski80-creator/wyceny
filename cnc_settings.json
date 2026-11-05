@@ -18,7 +18,8 @@
     "Excel_Templates": {
         "quote": "C:\\Users\\Dawid.Jaworski\\Desktop\\wyceny\\templates\\quote.xlsx",
         "delivery_note": "C:\\Users\\Dawid.Jaworski\\Desktop\\wyceny\\templates\\delivery_note.xlsx",
-        "job_card": "C:\\Users\\Dawid.Jaworski\\Desktop\\wyceny\\templates\\job_card.xlsx"
+        "job_card": "C:\\Users\\Dawid.Jaworski\\Desktop\\wyceny\\templates\\job_card.xlsx",
+        "order_acknowledgment": "C:\\Users\\Dawid.Jaworski\\Desktop\\wyceny\\templates\\order_acknowledgment.xlsx"
     },
     "Logo_Path": "C:/Users/Dawid.Jaworski/Desktop/247 Machining Services - Logo Files/Logo Files/JPG/WhiteBackground -Black Text - Full Colour.jpg",
     "Pdf_Output_Directory": "C:/Users/Dawid.Jaworski/Desktop/PDF",

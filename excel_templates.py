@@ -5,6 +5,7 @@ import os
 import queue
 import re
 import subprocess
+import sys
 import tempfile
 import threading
 from datetime import date, datetime
@@ -20,6 +21,7 @@ DOCUMENT_LABELS = {
     "quote": "quote",
     "delivery_note": "delivery note",
     "job_card": "job card",
+    "order_acknowledgment": "order acknowledgment",
 }
 
 POWERSHELL_SCRIPT = r"""
@@ -402,6 +404,7 @@ def _common_values(document_type, data, settings):
         "quote": f"{'ORDER' if data.get('status') == 'order' else 'QUOTE'} NO: {number}",
         "delivery_note": "CUSTOMER DELIVERY NOTE",
         "job_card": "ROUTE CARD",
+        "order_acknowledgment": "ORDER ACKNOWLEDGEMENT",
     }[document_type]
     subtotal = 0.0
     for item in _get_items(data):
@@ -579,7 +582,7 @@ atexit.register(_stop_worker)
 def generate_excel_document(document_type, data, settings):
     if document_type not in DOCUMENT_LABELS:
         raise RuntimeError(f"Unknown Excel document type: {document_type}")
-    if document_type in ("delivery_note", "job_card") and data.get("status") != "order":
+    if document_type != "quote" and data.get("status") != "order":
         raise RuntimeError(
             f"A {DOCUMENT_LABELS[document_type]} can only be generated for an order."
         )
@@ -596,7 +599,12 @@ def generate_excel_document(document_type, data, settings):
             "in Settings > Excel Templates."
         )
     if not os.path.isabs(template_path):
-        template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), template_path)
+        base = (
+            os.path.dirname(sys.executable)
+            if getattr(sys, "frozen", False)
+            else os.path.dirname(os.path.abspath(__file__))
+        )
+        template_path = os.path.join(base, template_path)
     if not os.path.isfile(template_path):
         raise RuntimeError(f"The Excel template file does not exist: {template_path}")
     if os.path.splitext(template_path)[1].lower() != ".xlsx":
@@ -614,6 +622,7 @@ def generate_excel_document(document_type, data, settings):
         "quote": "Quote",
         "delivery_note": "Delivery_Note",
         "job_card": "Job_Card",
+        "order_acknowledgment": "Order_Acknowledgement",
     }[document_type]
     filename = f"{prefix}_{_safe_number(number)}.pdf"
     output_directory = str(settings.get("Pdf_Output_Directory", "")).strip()
