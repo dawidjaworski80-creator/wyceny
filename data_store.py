@@ -22,10 +22,21 @@ class DataStore:
         else:
             default_dir = os.path.dirname(os.path.abspath(__file__))
         self.base_dir = base_dir or default_dir
-        self.data_file = os.path.join(self.base_dir, "quotes_data.json")
         self.settings_file = os.path.join(self.base_dir, "cnc_settings.json")
-        self.customers_file = os.path.join(self.base_dir, "customers_data.json")
-        self.suppliers_file = os.path.join(self.base_dir, "suppliers_data.json")
+        self.data_folder_error = ""
+        self.set_data_folder("")
+
+    def set_data_folder(self, folder: str):
+        """Point the quotes, customers and suppliers files at folder (empty = app folder)."""
+        folder = str(folder or "").strip()
+        self.data_folder_error = ""
+        if folder and not os.path.isdir(folder):
+            self.data_folder_error = f"Data folder is not available: {folder}"
+            folder = ""
+        directory = folder or self.base_dir
+        self.data_file = os.path.join(directory, "quotes_data.json")
+        self.customers_file = os.path.join(directory, "customers_data.json")
+        self.suppliers_file = os.path.join(directory, "suppliers_data.json")
 
     def _load_json(self, file_path: str, default: Any):
         if os.path.exists(file_path):
@@ -83,6 +94,7 @@ class DataStore:
             }
         else:
             default_rates["Excel_Templates"] = default_templates
+        self.set_data_folder(default_rates.get("Data_Folder", ""))
         return default_rates
 
     def save_settings(self, settings: Dict[str, Any]):

@@ -1,4 +1,4 @@
-import calendar
+﻿import calendar
 from copy import deepcopy
 import tkinter as tk
 from tkinter import font as tkfont, ttk, messagebox, filedialog, colorchooser, simpledialog
@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 import math
 import os
 import re
+import shutil
 import tempfile
 import time
 
@@ -165,7 +166,7 @@ class GridTreeview(ttk.Treeview):
             existing_tags = (existing_tags,)
         kwargs["tags"] = (row_tag, *existing_tags)
         values = tuple(kwargs.get("values", ()))
-        kwargs["values"] = values + ("│",) * len(self.separator_columns)
+        kwargs["values"] = values + ("â”‚",) * len(self.separator_columns)
         return super().insert(parent, index, iid=iid, **kwargs)
 
 
@@ -228,6 +229,15 @@ class CncQuotesApp:
         if suppliers_updated and not self.software_is_expired():
             self.store.save_suppliers(self.suppliers)
         self.current_view = "home"
+        if self.store.data_folder_error:
+            self.root.after(
+                500,
+                lambda: messagebox.showwarning(
+                    "Data folder unavailable",
+                    f"{self.store.data_folder_error}\n\nUsing the local data files instead. "
+                    "Check the network connection or Settings > Links, then restart.",
+                ),
+            )
 
         self.create_widgets()
         self.refresh_list()
@@ -602,7 +612,7 @@ class CncQuotesApp:
         self.tree.heading("customer_po", text="Customer PO Number")
         self.tree.heading("name", text="Quote Description")
         self.tree.heading("required_date", text="Date Required")
-        self.tree.heading("gross_total", text="Gross Total (£/$)")
+        self.tree.heading("gross_total", text="Gross Total (Â£/$)")
         self.tree.heading("order_status", text="Status")
         self.tree.heading("job_card", text="Job Card")
 
@@ -2787,7 +2797,7 @@ class CncQuotesApp:
             canvas.create_text(
                 page_x + 6,
                 page_y + page_height + 8,
-                text="A4 • 210 × 297 mm",
+                text="A4 â€¢ 210 Ã— 297 mm",
                 anchor=tk.NW,
                 fill="#475569",
                 font=("Arial", 8),
@@ -3419,7 +3429,7 @@ class CncQuotesApp:
             canvas.create_text(
                 page_x + 6,
                 page_y + page_height_px + 8,
-                text="A4 • 210 × 297 mm",
+                text="A4 â€¢ 210 Ã— 297 mm",
                 anchor="nw",
                 fill="#475569",
                 font=("Arial", 8),
@@ -4091,7 +4101,7 @@ class CncQuotesApp:
     def open_links_settings_window(self, parent):
         win = tk.Toplevel(parent)
         win.title("Links")
-        win.geometry("700x400")
+        win.geometry("720x460")
         win.transient(parent)
         win.grab_set()
 
@@ -4145,6 +4155,7 @@ class CncQuotesApp:
             ("Quotes_Folder", "Quotes Folder:", "quotes"),
             ("Delivery_Notes_Folder", "Delivery Notes Folder:", "delivery notes"),
             ("Acknowledgments_Folder", "Acknowledgments Folder:", "acknowledgments"),
+            ("Data_Folder", "Database (.json) Folder:", "database"),
         )
         folder_vars = {}
         folder_entries = []
@@ -4170,9 +4181,12 @@ class CncQuotesApp:
             )
         tk.Label(
             win,
-            text="Empty folder fields fall back to the PDF Save Folder.",
+            text=(
+                "Empty folder fields fall back to the PDF Save Folder; an empty database "
+                "folder uses the application folder."
+            ),
             fg="#475569",
-        ).grid(row=6, column=1, sticky="w", padx=5)
+        ).grid(row=7, column=1, sticky="w", padx=5)
         self.bind_enter_to_next(logo_entry, pdf_directory_entry, *folder_entries)
         win.columnconfigure(1, weight=1)
 
@@ -4211,19 +4225,48 @@ class CncQuotesApp:
 
             self.settings["Logo_Path"] = selected_logo
             self.settings["Pdf_Output_Directory"] = selected_directory
+            previous_folders = {key: self.settings.get(key) for key in selected_folders}
             self.settings.update(selected_folders)
             try:
                 self.save_settings()
             except OSError as exc:
+                for key, value in previous_folders.items():
+                    if value is None:
+                        self.settings.pop(key, None)
+                    else:
+                        self.settings[key] = value
                 messagebox.showerror("Save failed", f"Could not save links:\n{exc}", parent=win)
                 return
             self.refresh_app_logo()
             self.refresh_watermarks()
-            messagebox.showinfo("Success", "Links saved successfully.", parent=win)
+            message = "Links saved successfully."
+            new_data_folder = selected_folders["Data_Folder"]
+            if new_data_folder != str(previous_folders["Data_Folder"] or ""):
+                copied = []
+                for name in ("quotes_data.json", "customers_data.json", "suppliers_data.json"):
+                    source = os.path.join(self.store.base_dir, name)
+                    target = os.path.join(new_data_folder or self.store.base_dir, name)
+                    if os.path.isfile(source) and not os.path.exists(target):
+                        try:
+                            shutil.copy2(source, target)
+                            copied.append(name)
+                        except OSError as exc:
+                            messagebox.showerror(
+                                "Copy failed",
+                                f"Could not copy {name} to the new database folder:\n{exc}",
+                                parent=win,
+                            )
+                message += (
+                    "\n\nThe database folder changed. Existing files missing from the "
+                    "new folder were copied there"
+                    + (f" ({', '.join(copied)})" if copied else "")
+                    + ".\nRestart the application to use the new database location."
+                )
+            messagebox.showinfo("Success", message, parent=win)
             win.destroy()
 
         tk.Button(win, text="Save", command=save_links, bg="#2196F3", fg="white").grid(
-            row=7, column=0, columnspan=3, pady=18
+            row=8, column=0, columnspan=3, pady=18
         )
 
     def open_rates_settings_window(self, parent):
@@ -4244,6 +4287,7 @@ class CncQuotesApp:
             "Quotes_Folder",
             "Delivery_Notes_Folder",
             "Acknowledgments_Folder",
+            "Data_Folder",
             "Company_Name",
             "Company_Address",
             "Company_Postcode",
@@ -4619,6 +4663,7 @@ class CncQuotesApp:
             "Quotes_Folder",
             "Delivery_Notes_Folder",
             "Acknowledgments_Folder",
+            "Data_Folder",
             "Company_Name",
             "Company_Address",
             "Company_Postcode",
@@ -5329,14 +5374,14 @@ class CncQuotesApp:
                 planned_hours = self.get_planned_operation_hours(item)
                 if actual_hours is None:
                     text = (
-                        f"Planned: {planned_hours:.2f} h — enter actual time"
+                        f"Planned: {planned_hours:.2f} h â€” enter actual time"
                         if planned_hours > 0
                         else "No planned operation time"
                     )
                     work_time_result.config(text=text, fg="#475569")
                 elif planned_hours <= 0:
                     work_time_result.config(
-                        text=f"Actual: {float(actual_hours):.2f} h — no planned time",
+                        text=f"Actual: {float(actual_hours):.2f} h â€” no planned time",
                         fg="#475569",
                     )
                 elif float(actual_hours) > planned_hours:
