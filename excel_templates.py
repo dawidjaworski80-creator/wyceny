@@ -625,7 +625,13 @@ def generate_excel_document(document_type, data, settings):
         "order_acknowledgment": "Order_Acknowledgement",
     }[document_type]
     filename = f"{prefix}_{_safe_number(number)}.pdf"
-    output_directory = str(settings.get("Pdf_Output_Directory", "")).strip()
+    folder_key = {
+        "quote": "Quotes_Folder",
+        "delivery_note": "Delivery_Notes_Folder",
+        "order_acknowledgment": "Acknowledgments_Folder",
+    }.get(document_type)
+    output_directory = str(settings.get(folder_key, "")).strip() if folder_key else ""
+    output_directory = output_directory or str(settings.get("Pdf_Output_Directory", "")).strip()
     if output_directory and not os.path.isdir(output_directory):
         raise RuntimeError(f"PDF save folder does not exist: {output_directory}")
     output_path = os.path.abspath(os.path.join(output_directory or os.getcwd(), filename))

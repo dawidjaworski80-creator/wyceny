@@ -4091,7 +4091,7 @@ class CncQuotesApp:
     def open_links_settings_window(self, parent):
         win = tk.Toplevel(parent)
         win.title("Links")
-        win.geometry("620x240")
+        win.geometry("700x400")
         win.transient(parent)
         win.grab_set()
 
@@ -4141,6 +4141,41 @@ class CncQuotesApp:
             row=2, column=1, sticky="w", padx=5
         )
 
+        folder_fields = (
+            ("Quotes_Folder", "Quotes Folder:", "quotes"),
+            ("Delivery_Notes_Folder", "Delivery Notes Folder:", "delivery notes"),
+            ("Acknowledgments_Folder", "Acknowledgments Folder:", "acknowledgments"),
+        )
+        folder_vars = {}
+        folder_entries = []
+        for offset, (key, label, description) in enumerate(folder_fields, start=3):
+            folder_vars[key] = tk.StringVar(value=self.settings.get(key, ""))
+            tk.Label(win, text=label).grid(row=offset, column=0, padx=12, pady=8, sticky="e")
+            folder_entry = tk.Entry(win, textvariable=folder_vars[key], width=48)
+            folder_entry.grid(row=offset, column=1, padx=5, pady=8, sticky="ew")
+            folder_entries.append(folder_entry)
+
+            def browse_folder(variable=folder_vars[key], name=description):
+                chosen = filedialog.askdirectory(
+                    parent=win,
+                    title=f"Select {name} folder",
+                    initialdir=variable.get() or pdf_directory.get() or os.getcwd(),
+                    mustexist=True,
+                )
+                if chosen:
+                    variable.set(chosen)
+
+            tk.Button(win, text="Browse...", command=browse_folder).grid(
+                row=offset, column=2, padx=5, pady=8
+            )
+        tk.Label(
+            win,
+            text="Empty folder fields fall back to the PDF Save Folder.",
+            fg="#475569",
+        ).grid(row=6, column=1, sticky="w", padx=5)
+        self.bind_enter_to_next(logo_entry, pdf_directory_entry, *folder_entries)
+        win.columnconfigure(1, weight=1)
+
         def save_links():
             if self.show_changes_blocked(win):
                 return
@@ -4162,8 +4197,21 @@ class CncQuotesApp:
                 )
                 return
 
+            selected_folders = {}
+            for key, label, _ in folder_fields:
+                folder = folder_vars[key].get().strip()
+                if folder and not os.path.isdir(folder):
+                    messagebox.showerror(
+                        "Invalid folder",
+                        f"The folder for {label.rstrip(':')} does not exist.",
+                        parent=win,
+                    )
+                    return
+                selected_folders[key] = folder
+
             self.settings["Logo_Path"] = selected_logo
             self.settings["Pdf_Output_Directory"] = selected_directory
+            self.settings.update(selected_folders)
             try:
                 self.save_settings()
             except OSError as exc:
@@ -4175,7 +4223,7 @@ class CncQuotesApp:
             win.destroy()
 
         tk.Button(win, text="Save", command=save_links, bg="#2196F3", fg="white").grid(
-            row=3, column=0, columnspan=3, pady=18
+            row=7, column=0, columnspan=3, pady=18
         )
 
     def open_rates_settings_window(self, parent):
@@ -4193,6 +4241,9 @@ class CncQuotesApp:
             "Software_End_Date",
             "Logo_Path",
             "Pdf_Output_Directory",
+            "Quotes_Folder",
+            "Delivery_Notes_Folder",
+            "Acknowledgments_Folder",
             "Company_Name",
             "Company_Address",
             "Company_Postcode",
@@ -4565,6 +4616,9 @@ class CncQuotesApp:
             "Software_End_Date",
             "Logo_Path",
             "Pdf_Output_Directory",
+            "Quotes_Folder",
+            "Delivery_Notes_Folder",
+            "Acknowledgments_Folder",
             "Company_Name",
             "Company_Address",
             "Company_Postcode",
