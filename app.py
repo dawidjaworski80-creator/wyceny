@@ -6497,6 +6497,12 @@ class CncQuotesApp:
             for quote in self.quotes
             if quote.get("status", "quote") != "order"
         ]
+        # Orders keep the number of the quote they came from so it is never issued again.
+        for record in self.quotes:
+            try:
+                quote_numbers.append(int(record["quote_number"]))
+            except (KeyError, TypeError, ValueError):
+                continue
         if not quote_numbers:
             return starting_number
         highest_number = max(quote_numbers)
@@ -6772,6 +6778,7 @@ class CncQuotesApp:
             return
 
         order_number = self.next_order_number()
+        quote_data["quote_number"] = quote_data["number"]
         quote_data["status"] = "order"
         quote_data["number"] = order_number
         quote_data["order_status"] = "Pending"
@@ -6793,7 +6800,17 @@ class CncQuotesApp:
             return
 
         quote = deepcopy(order)
-        quote["number"] = self.next_quote_number()
+        original_number = order.get("quote_number")
+        quote_numbers_in_use = {
+            str(record.get("number"))
+            for record in self.quotes
+            if record.get("status", "quote") != "order"
+        }
+        if original_number is not None and str(original_number) not in quote_numbers_in_use:
+            quote["number"] = original_number
+        else:
+            quote["number"] = self.next_quote_number()
+        quote.pop("quote_number", None)
         quote["status"] = "quote"
         quote["created_by"] = self.current_user
         quote.pop("order_status", None)
