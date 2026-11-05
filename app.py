@@ -804,6 +804,7 @@ class CncQuotesApp:
             "name",
             "required_date",
             "gross_total",
+            "author",
             "order_status",
             "job_card",
         )
@@ -823,6 +824,7 @@ class CncQuotesApp:
         self.tree.heading("name", text="Quote Description")
         self.tree.heading("required_date", text="Date Required")
         self.tree.heading("gross_total", text="Gross Total (Â£/$)")
+        self.tree.heading("author", text="Author")
         self.tree.heading("order_status", text="Status")
         self.tree.heading("job_card", text="Job Card")
 
@@ -832,6 +834,7 @@ class CncQuotesApp:
         self.tree.column("name", width=250)
         self.tree.column("required_date", width=145, anchor=tk.CENTER)
         self.tree.column("gross_total", width=120, anchor=tk.E)
+        self.tree.column("author", width=110, anchor=tk.CENTER)
         self.tree.column("order_status", width=110, anchor=tk.CENTER)
         self.tree.column("job_card", width=170, anchor=tk.CENTER, stretch=False)
 
@@ -1001,14 +1004,14 @@ class CncQuotesApp:
         if self.current_view == "orders":
             visible_columns = (
                 "number", "customer", "customer_po", "name", "required_date",
-                "gross_total", "order_status", "job_card",
+                "gross_total", "author", "order_status", "job_card",
             )
         elif self.current_view == "quotes":
-            visible_columns = ("number", "customer", "name", "required_date", "gross_total")
+            visible_columns = ("number", "customer", "name", "required_date", "gross_total", "author")
         else:
             visible_columns = (
                 "number", "customer", "name", "required_date",
-                "gross_total", "order_status", "job_card",
+                "gross_total", "author", "order_status", "job_card",
             )
         data_columns = tuple(self.tree["columns"])
         column_indices = {column: index for index, column in enumerate(data_columns)}
@@ -1096,6 +1099,7 @@ class CncQuotesApp:
                     q.get("name", ""),
                     required_date,
                     f"{gross_total:.2f}",
+                    q.get("created_by", ""),
                     (
                         "Pending"
                         if q.get("order_status") == "Generated"
@@ -6287,6 +6291,7 @@ class CncQuotesApp:
 
             if quote_data is None:
                 new_data["status"] = "quote"
+                new_data["created_by"] = self.current_user
                 self.quotes.append(new_data)
             else:
                 if is_order:
@@ -6546,6 +6551,7 @@ class CncQuotesApp:
         pasted_quote = deepcopy(self.quote_clipboard)
         pasted_quote["number"] = self.next_quote_number()
         pasted_quote["status"] = "quote"
+        pasted_quote["created_by"] = self.current_user
         pasted_quote.pop("order_status", None)
         pasted_quote.pop("job_card_generated", None)
         pasted_quote.pop("job_card_generated_date", None)
@@ -6789,6 +6795,7 @@ class CncQuotesApp:
         quote = deepcopy(order)
         quote["number"] = self.next_quote_number()
         quote["status"] = "quote"
+        quote["created_by"] = self.current_user
         quote.pop("order_status", None)
         quote.pop("customer_po_number", None)
         quote.pop("job_card_generated", None)
