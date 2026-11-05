@@ -14,5 +14,8 @@ if __name__ == "__main__":
         pass
     run_splash_screen(root, DataStore().load_settings())
     app = CncQuotesApp(root)
+    if not app.prompt_login():
+        root.destroy()
+        raise SystemExit
     root.deiconify()
     root.mainloop()

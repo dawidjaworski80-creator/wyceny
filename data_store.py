@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -13,6 +15,30 @@ def clean_address(value: Any) -> str:
     text = re.sub(r" +,", ",", text)
     text = re.sub(r" *\n *", "\n", text)
     return text.strip()
+
+
+PASSWORD_ITERATIONS = 200_000
+
+
+def make_password_record(password: str) -> Dict[str, Any]:
+    salt = os.urandom(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PASSWORD_ITERATIONS)
+    return {
+        "salt": salt.hex(),
+        "hash": digest.hex(),
+        "iterations": PASSWORD_ITERATIONS,
+    }
+
+
+def verify_password(record: Dict[str, Any], password: str) -> bool:
+    try:
+        salt = bytes.fromhex(record["salt"])
+        expected = bytes.fromhex(record["hash"])
+        iterations = int(record.get("iterations", PASSWORD_ITERATIONS))
+    except (KeyError, TypeError, ValueError):
+        return False
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+    return hmac.compare_digest(digest, expected)
 
 
 class DataStore:
@@ -37,6 +63,14 @@ class DataStore:
         self.data_file = os.path.join(directory, "quotes_data.json")
         self.customers_file = os.path.join(directory, "customers_data.json")
         self.suppliers_file = os.path.join(directory, "suppliers_data.json")
+        self.users_file = os.path.join(directory, "users_data.json")
+
+    def load_users(self) -> Dict[str, Dict[str, str]]:
+        users = self._load_json(self.users_file, {})
+        return users if isinstance(users, dict) else {}
+
+    def save_users(self, users: Dict[str, Dict[str, str]]):
+        self._save_json(self.users_file, users)
 
     def _load_json(self, file_path: str, default: Any):
         if os.path.exists(file_path):

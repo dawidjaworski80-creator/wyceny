@@ -10,7 +10,7 @@ import shutil
 import tempfile
 import time
 
-from data_store import DataStore, clean_address
+from data_store import DataStore, clean_address, make_password_record, verify_password
 from email_service import EmailService
 from pdf_service import PdfService
 from pdf_layouts import (
@@ -173,7 +173,8 @@ class GridTreeview(ttk.Treeview):
 class CncQuotesApp:
     def __init__(self, root):
         self.root = root
-        self.root.title(" - Quoting System")
+        self.base_title = " - Quoting System"
+        self.root.title(self.base_title)
         self.root.geometry("1100x550")
         self.root.after_idle(self.root.state, "zoomed")
         style = ttk.Style(self.root)
@@ -208,6 +209,7 @@ class CncQuotesApp:
         )
 
         self.store = DataStore()
+        self.current_user = ""
         self.settings = self.store.load_settings()
         self.customers = self.store.load_customers()
         if self._normalize_customers() and not self.software_is_expired():
@@ -468,6 +470,189 @@ class CncQuotesApp:
         )
         show_month()
 
+    def update_user_display(self):
+        if self.current_user:
+            self.user_label.config(text=f"Logged in: {self.current_user}")
+            self.switch_user_button.config(state=tk.NORMAL)
+        else:
+            self.user_label.config(text="Not logged in (no accounts)")
+            self.switch_user_button.config(state=tk.DISABLED)
+        self.root.title(
+            f"{self.base_title} - {self.current_user}" if self.current_user else self.base_title
+        )
+
+    def prompt_login(self):
+        """Ask for credentials when accounts exist. Returns False if the user cancels."""
+        users = self.store.load_users()
+        if not users:
+            self.current_user = ""
+            self.update_user_display()
+            return True
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Log in")
+        dialog.resizable(False, False)
+        dialog.attributes("-topmost", True)
+        dialog.columnconfigure(1, weight=1)
+        result = {"ok": False}
+
+        tk.Label(dialog, text="User:").grid(row=0, column=0, padx=(14, 6), pady=(16, 6), sticky="e")
+        user_entry = ttk.Combobox(dialog, values=sorted(users, key=str.casefold), width=28)
+        user_entry.grid(row=0, column=1, padx=(0, 14), pady=(16, 6))
+        tk.Label(dialog, text="Password:").grid(row=1, column=0, padx=(14, 6), pady=6, sticky="e")
+        password_entry = tk.Entry(dialog, show="*", width=30)
+        password_entry.grid(row=1, column=1, padx=(0, 14), pady=6)
+        error_label = tk.Label(dialog, text="", fg="#B91C1C")
+        error_label.grid(row=2, column=0, columnspan=2)
+
+        def attempt_login(event=None):
+            name = user_entry.get().strip()
+            matched = next((key for key in users if key.casefold() == name.casefold()), None)
+            if matched is None or not verify_password(users[matched], password_entry.get()):
+                error_label.config(text="Incorrect user name or password.")
+                password_entry.delete(0, tk.END)
+                password_entry.focus_set()
+                return
+            self.current_user = matched
+            result["ok"] = True
+            dialog.destroy()
+
+        buttons = tk.Frame(dialog)
+        buttons.grid(row=3, column=0, columnspan=2, pady=(6, 14))
+        tk.Button(
+            buttons, text="Log in", command=attempt_login, bg="#2563EB", fg="white", width=12
+        ).pack(side=tk.LEFT, padx=6)
+        tk.Button(buttons, text="Exit", command=dialog.destroy, width=12).pack(side=tk.LEFT, padx=6)
+        dialog.bind("<Return>", attempt_login)
+        dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
+
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() - dialog.winfo_reqwidth()) // 2
+        y = (dialog.winfo_screenheight() - dialog.winfo_reqheight()) // 3
+        dialog.geometry(f"+{x}+{y}")
+        user_entry.focus_set()
+        dialog.grab_set()
+        self.root.wait_window(dialog)
+        self.update_user_display()
+        return result["ok"]
+
+    def log_out(self):
+        if not messagebox.askyesno("Log out", "Log out and sign in as another user?", parent=self.root):
+            return
+        self.root.withdraw()
+        self.current_user = ""
+        if self.prompt_login():
+            self.root.deiconify()
+        else:
+            self.root.destroy()
+
+    def open_users_admin(self, parent):
+        window = tk.Toplevel(parent)
+        window.title("Users")
+        window.geometry("420x360")
+        window.transient(parent)
+        window.grab_set()
+
+        users_list = tk.Listbox(window, height=10, exportselection=False)
+        users_list.pack(fill=tk.BOTH, expand=True, padx=12, pady=(12, 6))
+
+        def refresh_users():
+            users_list.delete(0, tk.END)
+            for name in sorted(self.store.load_users(), key=str.casefold):
+                users_list.insert(tk.END, name)
+
+        def ask_password(title, name):
+            password = simpledialog.askstring(
+                title, f"New password for {name}:", show="*", parent=window
+            )
+            if password is None:
+                return None
+            if len(password) < 4:
+                messagebox.showerror("Invalid password", "Use at least 4 characters.", parent=window)
+                return None
+            confirm = simpledialog.askstring(
+                title, "Repeat the password:", show="*", parent=window
+            )
+            if confirm != password:
+                messagebox.showerror("Invalid password", "The passwords do not match.", parent=window)
+                return None
+            return password
+
+        def save_users(users):
+            try:
+                self.store.save_users(users)
+            except OSError as exc:
+                messagebox.showerror("Save failed", f"Could not save users:\n{exc}", parent=window)
+                return False
+            return True
+
+        def add_user():
+            name = simpledialog.askstring("Add user", "User name:", parent=window)
+            if name is None:
+                return
+            name = name.strip()
+            users = self.store.load_users()
+            if not name:
+                messagebox.showerror("Invalid name", "Enter a user name.", parent=window)
+                return
+            if any(key.casefold() == name.casefold() for key in users):
+                messagebox.showerror("Duplicate", "This user already exists.", parent=window)
+                return
+            password = ask_password("Add user", name)
+            if password is None:
+                return
+            users[name] = make_password_record(password)
+            if save_users(users):
+                refresh_users()
+
+        def selected_user():
+            selection = users_list.curselection()
+            if not selection:
+                messagebox.showinfo("Users", "Select a user first.", parent=window)
+                return None
+            return users_list.get(selection[0])
+
+        def change_password():
+            name = selected_user()
+            if name is None:
+                return
+            password = ask_password("Set password", name)
+            if password is None:
+                return
+            users = self.store.load_users()
+            users[name] = make_password_record(password)
+            if save_users(users):
+                messagebox.showinfo("Users", f"Password for {name} was changed.", parent=window)
+
+        def delete_user():
+            name = selected_user()
+            if name is None:
+                return
+            if not messagebox.askyesno("Delete user", f"Delete user {name}?", parent=window):
+                return
+            users = self.store.load_users()
+            users.pop(name, None)
+            if save_users(users):
+                refresh_users()
+
+        buttons = tk.Frame(window)
+        buttons.pack(pady=(0, 6))
+        tk.Button(buttons, text="Add user...", command=add_user, width=14).pack(side=tk.LEFT, padx=4)
+        tk.Button(buttons, text="Set password...", command=change_password, width=14).pack(
+            side=tk.LEFT, padx=4
+        )
+        tk.Button(buttons, text="Delete user", command=delete_user, width=12).pack(side=tk.LEFT, padx=4)
+        tk.Label(
+            window,
+            text=(
+                "When at least one user exists, the program asks for a login at startup.\n"
+                "Deleting every user turns the login off."
+            ),
+            fg="#64748B",
+            justify=tk.LEFT,
+        ).pack(padx=12, pady=(0, 10), anchor="w")
+        refresh_users()
+
     def create_widgets(self):
         navigation = tk.Frame(self.root, bg="#1F2937")
         navigation.pack(side=tk.TOP, fill=tk.X)
@@ -510,6 +695,31 @@ class CncQuotesApp:
             ("Suppliers", self.open_supplier_database),
             ("Settings", self.open_settings_window),
         )
+        self.user_label = tk.Label(
+            navigation,
+            text="",
+            bg="#1F2937",
+            fg="#A7F3D0",
+            font=("Arial", 9, "bold"),
+        )
+        self.user_label.pack(side=tk.RIGHT, padx=(4, 12))
+        self.switch_user_button = tk.Button(
+            navigation,
+            text="Log out",
+            command=self.log_out,
+            bg="#334155",
+            fg="#E2E8F0",
+            activebackground="#475569",
+            activeforeground="white",
+            relief=tk.FLAT,
+            borderwidth=0,
+            cursor="hand2",
+            padx=10,
+            pady=10,
+            font=("Arial", 9, "bold"),
+        )
+        self.switch_user_button.pack(side=tk.RIGHT, padx=4, pady=8)
+        self.update_user_display()
         for label, command in utility_buttons:
             button = tk.Button(
                 navigation,
@@ -1904,7 +2114,7 @@ class CncQuotesApp:
 
             admin_window = tk.Toplevel(win)
             admin_window.title("Admin Settings")
-            admin_window.geometry("480x230")
+            admin_window.geometry("480x280")
             admin_window.resizable(False, False)
             admin_window.transient(win)
             admin_window.grab_set()
@@ -2039,6 +2249,11 @@ class CncQuotesApp:
                 padx=16,
                 pady=6,
             ).grid(row=3, column=0, columnspan=3, pady=12)
+            tk.Button(
+                admin_window,
+                text="Users / Passwords...",
+                command=lambda: self.open_users_admin(admin_window),
+            ).grid(row=4, column=0, columnspan=3, pady=(0, 12))
 
         tk.Button(
             end_date_frame,
@@ -4243,7 +4458,12 @@ class CncQuotesApp:
             new_data_folder = selected_folders["Data_Folder"]
             if new_data_folder != str(previous_folders["Data_Folder"] or ""):
                 copied = []
-                for name in ("quotes_data.json", "customers_data.json", "suppliers_data.json"):
+                for name in (
+                    "quotes_data.json",
+                    "customers_data.json",
+                    "suppliers_data.json",
+                    "users_data.json",
+                ):
                     source = os.path.join(self.store.base_dir, name)
                     target = os.path.join(new_data_folder or self.store.base_dir, name)
                     if os.path.isfile(source) and not os.path.exists(target):
@@ -6906,5 +7126,8 @@ if __name__ == "__main__":
         pass
     run_splash_screen(root, DataStore().load_settings())
     app = CncQuotesApp(root)
+    if not app.prompt_login():
+        root.destroy()
+        raise SystemExit
     root.deiconify()
     root.mainloop()
